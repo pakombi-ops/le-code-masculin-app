@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Le Code Masculin",
+    "slug": "le-code-masculin",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D0D1A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.pilierconscient.lecodemascuiin"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0D0D1A"
+      },
+      "package": "com.pilierconscient.lecodemascuiin"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "scheme": "lecodemascuiin",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "105a9483-53e5-461e-ad33-fb3b243f7e64"
+      }
+    }
+  }
+}
