@@ -44,7 +44,16 @@ export default function RootLayout() {
     checkSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(!!session);
+  setIsAuthenticated(!!session);
+
+  if (session?.user) {
+    useAuthStore.getState().setUser({
+      id: session.user.id,
+      email: session.user.email ?? '',
+      prenom: session.user.user_metadata?.prenom ?? '',
+    });
+    useAuthStore.getState().loadUser(session.user.id);
+  }
     });
 
     return () => listener?.subscription.unsubscribe();
