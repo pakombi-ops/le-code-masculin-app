@@ -7,7 +7,7 @@ import { router } from 'expo-router';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { Card, Badge, ProgressBar } from '../../components/ui';
 import { useAuthStore } from '../../store/authStore';
-import { updateStreak } from '../../services/supabase';
+import { updateStreak, logDailyActivity, getWeekActivity } from '../../services/supabase';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -16,13 +16,23 @@ const DAY_LABELS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 export default function HomeScreen() {
   const { user, streak, aiQuota, isLoading, refreshStreak } = useAuthStore();
   const [updating, setUpdating] = useState(false);
+  const [weekActivityDates, setWeekActivityDates] = useState<string[]>([]);
 
-  // Mettre à jour le streak à chaque ouverture du dashboard
+  // Mettre à jour le streak + l'activité du jour à chaque ouverture du dashboard
   useEffect(() => {
     if (user?.id) {
       setUpdating(true);
-      updateStreak(user.id)
-        .then(() => refreshStreak(user.id))
+      Promise.all([
+        updateStreak(user.id),
+        logDailyActivity(user.id),
+      ])
+        .then(() => Promise.all([
+          refreshStreak(user.id),
+          getWeekActivity(user.id),
+        ]))
+        .then(([, weekRes]) => {
+          setWeekActivityDates(weekRes.data?.map((d: any) => d.activity_date) ?? []);
+        })
         .finally(() => setUpdating(false));
     }
   }, [user?.id]);
@@ -36,13 +46,17 @@ export default function HomeScreen() {
   const messagesRemaining = Math.max(0, 10 - messagesUsed);
   const isPremium = aiQuota?.is_premium ?? false;
 
-  // Générer les 7 jours de la semaine
+  // Générer les 7 jours de la semaine (lundi → dimanche) selon l'activité réelle
   const weekDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
+    const now = new Date();
+    const day = now.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMonday);
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
     const dayStr = d.toISOString().split('T')[0];
-    const lastActivity = streak?.last_activity_date;
-    return lastActivity ? dayStr <= lastActivity : false;
+    return weekActivityDates.includes(dayStr);
   });
 
   if (isLoading) {

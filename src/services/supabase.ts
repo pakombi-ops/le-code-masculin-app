@@ -73,7 +73,34 @@ export const updateUserProfile = async (userId: string, updates: {
     .single();
   return { data, error };
 };
+export const logDailyActivity = async (userId: string) => {
+  const today = new Date().toISOString().split('T')[0];
+  const { error } = await supabase
+    .from('daily_activity')
+    .upsert({ user_id: userId, activity_date: today }, { onConflict: 'user_id,activity_date' });
+  return { error };
+};
 
+export const getWeekActivity = async (userId: string) => {
+  const now = new Date();
+  const day = now.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMonday);
+  const mondayStr = monday.toISOString().split('T')[0];
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const sundayStr = sunday.toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from('daily_activity')
+    .select('activity_date')
+    .eq('user_id', userId)
+    .gte('activity_date', mondayStr)
+    .lte('activity_date', sundayStr);
+
+  return { data, error };
+};
 // ── Streak ────────────────────────────────────────────────────────────────────
 
 export const getUserStreak = async (userId: string) => {
