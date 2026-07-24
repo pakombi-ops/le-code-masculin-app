@@ -89,7 +89,7 @@ export default function ProgrammeScreen() {
           </Text>
           <TouchableOpacity
             style={paywallStyles.ctaButton}
-            onPress={() => Linking.openURL('https://pilierconscient.com/programme')}
+            onPress={() => Linking.openURL('https://pilierconscient.com/le-code-masculin-redeviens-lhomme-que-tu-sais-etre/')}
           >
             <Text style={paywallStyles.ctaText}>Voir les plans</Text>
           </TouchableOpacity>
