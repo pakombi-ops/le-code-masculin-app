@@ -14,6 +14,18 @@ export interface Pillar {
   color: string;
 }
 
+export const PILLAR_ZERO: Pillar = {
+  id: 0,
+  slug: 'avant-de-commencer',
+  name: 'Avant de Commencer',
+  tagline: 'Prépare-toi à entrer dans Le Code.',
+  description: "Les bases pour bien démarrer ton parcours dans Le Code Masculin.",
+  phase: 'fondation',
+  phaseWeeks: { start: 0, end: 0 },
+  totalModules: 2,
+  icon: 'flag',
+  color: '#8A8395',
+};
 export const PILLARS: Pillar[] = [
   { id: 1, slug: 'force-physique', name: 'Force Physique', tagline: 'Mon corps est mon premier domaine de conqu\u00eate.', description: 'Un homme fort physiquement est un homme fort mentalement.', phase: 'fondation', phaseWeeks: { start: 1, end: 4 }, totalModules: 4, icon: 'barbell', color: '#C4A35A' },
   { id: 2, slug: 'discipline', name: 'Discipline', tagline: 'Fais ce qui doit \u00eatre fait.', description: 'La motivation est temporaire. La discipline est permanente.', phase: 'fondation', phaseWeeks: { start: 5, end: 8 }, totalModules: 4, icon: 'target', color: '#C4A35A' },
@@ -35,5 +47,5 @@ export const PHASES = {
   impact: { label: 'IMPACT', subtitle: 'Semaines 35-52', color: '#4A9EFF', pillars: [4, 9, 10, 12] },
 } as const;
 
-export const getPillarById = (id: number) => PILLARS.find((p) => p.id === id);
+export const getPillarById = (id: number) => (id === 0 ? PILLAR_ZERO : PILLARS.find((p) => p.id === id));
 export const getPillarsByPhase = (phase: PillarPhase) => PILLARS.filter((p) => p.phase === phase);

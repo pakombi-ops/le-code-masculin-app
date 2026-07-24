@@ -40,6 +40,17 @@ export interface Week {
 }
 
 const ALL_LESSONS: Lesson[] = [
+  // MODULE 0 — Avant de commencer
+  { id:'module0-naviguer', pillarId:0, weekNumber:0, order:1, title:'Comment naviguer dans le programme', type:'video', duration:8*60, status:'locked',
+    description:'[CONTENU À COMPLÉTER — Prince] Présentation de la structure du programme : les 12 piliers, les 3 phases, le rythme hebdomadaire, comment utiliser l\'app au quotidien.',
+    keyInsight:'[CONTENU À COMPLÉTER]',
+    challenge:'[CONTENU À COMPLÉTER]',
+    resources:[]},
+  { id:'module0-bienvenue', pillarId:0, weekNumber:0, order:2, title:'Bienvenue dans Le Cercle des Piliers', type:'video', duration:6*60, status:'locked',
+    description:'[CONTENU À COMPLÉTER — Prince] Mot de bienvenue de Prince Johann, présentation de la communauté et de l\'esprit du Code Masculin.',
+    keyInsight:'[CONTENU À COMPLÉTER]',
+    challenge:'[CONTENU À COMPLÉTER]',
+    resources:[]},
   // P1 S1
   { id:'p1-s1', pillarId:1, weekNumber:1, order:1, title:'Ton Corps, Ton Premier Domaine de Conquête', type:'video', duration:20*60, status:'completed',
     description:'Pourquoi un homme faible physiquement est vulnérable mentalement. Le lien direct testostérone-confiance-respect de soi. La discipline physique qui "saigne" dans tous les domaines de vie. Évaluation de départ : où en es-tu vraiment ?',

@@ -12,6 +12,8 @@ import {
   getPillarProgressReal,
   getOverallProgress,
 } from '../../constants/progression';
+import { PILLAR_ZERO } from '../../constants/pillars';
+import { isModuleZeroCompleted } from '../../constants/progression';
 
 export default function ProgrammeScreen() {
   const { user, entitlement, checkEntitlement, userProgress, loadUserProgress } = useAuthStore();
@@ -110,6 +112,33 @@ export default function ProgrammeScreen() {
           </View>
         </View>
 
+        <View style={styles.moduleZeroSection}>
+  <TouchableOpacity
+    style={[
+      styles.pillarCard,
+      isModuleZeroCompleted(completedIds) && styles.pillarCardLocked,
+      !isModuleZeroCompleted(completedIds) && styles.pillarCardActive,
+    ]}
+    onPress={() => router.push({ pathname: '/pilier', params: { pillarId: '0' } })}
+    activeOpacity={0.8}
+  >
+    <View style={[styles.pillarIconBg, { borderColor: PILLAR_ZERO.color }]}>
+      <Text style={{ fontSize: 20 }}>🚩</Text>
+    </View>
+    <View style={styles.pillarInfo}>
+      <Text style={styles.pillarName}>{PILLAR_ZERO.name}</Text>
+      <Text style={styles.pillarTagline} numberOfLines={1}>{PILLAR_ZERO.tagline}</Text>
+    </View>
+    <View style={styles.pillarBadge}>
+      {isModuleZeroCompleted(completedIds) ? (
+        <Badge label="✓ COMPLÉTÉ" variant="completed" />
+      ) : (
+        <Badge label="COMMENCER ICI" variant="active" />
+      )}
+    </View>
+  </TouchableOpacity>
+</View>
+
         <View style={styles.content}>
           {phases.map(phaseKey => {
             const phase = PHASES[phaseKey];
@@ -144,6 +173,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.lg,
     borderBottomWidth: 1, borderBottomColor: Colors.border.subtle,
   },
+  moduleZeroSection: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg },
   headerTitle: { ...Typography.h2, color: Colors.text.primary, marginBottom: Spacing.md },
   globalProgress: {},
   progressLabel: { ...Typography.label, color: Colors.text.secondary },

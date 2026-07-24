@@ -18,9 +18,16 @@ export function isPillarCompleted(pillarId: number, completedIds: Set<string>): 
   return lessons.length > 0 && lessons.every((l) => completedIds.has(l.id));
 }
 
+export const MODULE_ZERO_LESSON_IDS = ['module0-naviguer', 'module0-bienvenue'];
+
+export function isModuleZeroCompleted(completedIds: Set<string>): boolean {
+  return MODULE_ZERO_LESSON_IDS.every((id) => completedIds.has(id));
+}
+
 export function isPillarUnlocked(pillarId: number, completedIds: Set<string>): boolean {
   const idx = PILLAR_ORDER.indexOf(pillarId);
-  if (idx <= 0) return true;
+  if (idx === 0) return isModuleZeroCompleted(completedIds);
+  if (idx < 0) return true;
   const previousPillarId = PILLAR_ORDER[idx - 1];
   return isPillarCompleted(previousPillarId, completedIds);
 }
@@ -49,9 +56,7 @@ export function getLessonStatus(
 
   const lessonIdx = pillarLessons.findIndex((l) => l.id === lesson.id);
   if (lessonIdx === 0) {
-    return completedIds.size === 0 || pillarLessons.every((l) => !completedIds.has(l.id))
-      ? 'active'
-      : 'locked';
+    return pillarLessons.every((l) => !completedIds.has(l.id)) ? 'active' : 'locked';
   }
 
   const previousLesson = pillarLessons[lessonIdx - 1];
@@ -59,12 +64,16 @@ export function getLessonStatus(
 
   if (!previousCompletion) return 'locked';
 
+  const firstIncomplete = pillarLessons.find((l) => !completedIds.has(l.id));
+  if (firstIncomplete?.id !== lesson.id) return 'locked';
+
+  if (lesson.pillarId === 0) {
+    return 'active';
+  }
+
   const completedAt = new Date(previousCompletion.completed_at);
   const unlockDate = new Date(completedAt);
   unlockDate.setDate(unlockDate.getDate() + 7);
-
-  const firstIncomplete = pillarLessons.find((l) => !completedIds.has(l.id));
-  if (firstIncomplete?.id !== lesson.id) return 'locked';
 
   return new Date() >= unlockDate ? 'active' : 'locked';
 }
