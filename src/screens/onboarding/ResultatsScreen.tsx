@@ -17,7 +17,7 @@ function polar(angle: number, r: number) {
 }
 
 function RadarChart({ scores }: { scores: Record<number, number> }) {
-  const pillars = [2, 10, 7, 5, 1, 6, 8, 11];
+  const pillars = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   const n = pillars.length;
   const step = 360 / n;
   const grid = [0.25, 0.5, 0.75, 1.0];
@@ -47,15 +47,19 @@ export default function ResultatsScreen() {
   }, []);
 
   const insights: Record<number, string> = {
-    2: "Tu connais tes objectifs. Tu cèdes encore trop souvent.",
-    10: "Tu perçois l'injustice. Exprimer ton désaccord est encore difficile.",
-    7: "Tu es là physiquement. Être là entièrement est un travail à part.",
-    5: "Tu vis sans direction claire. C'est un point de départ.",
-    1: "Ton corps attend ta décision. La transformation commence là.",
-    6: "Ta parole n'est pas encore ta loi. C'est le fondement de tout.",
-    8: "Tu réagis encore plus que tu ne réponds. La maîtrise s'apprend.",
-    11: "Tu te censures encore. L'homme authentique dérange.",
-  };
+  1: "Ton corps attend ta décision. La transformation commence là.",
+  2: "Tu connais tes objectifs. Tu cèdes encore trop souvent.",
+  3: "Tu attends que les autres décident. Le leader en toi est encore silencieux.",
+  4: "Tu portes tout seul. S'ouvrir avec discernement est une force, pas une faiblesse.",
+  5: "Tu vis sans direction claire. C'est un point de départ.",
+  6: "Ta parole n'est pas encore ta loi. C'est le fondement de tout.",
+  7: "Tu es là physiquement. Être là entièrement est un travail à part.",
+  8: "Tu réagis encore plus que tu ne réponds. La maîtrise s'apprend.",
+  9: "Tu donnes quand c'est pratique. La générosité vraie crée du temps.",
+  10: "Tu perçois l'injustice. Exprimer ton désaccord est encore difficile.",
+  11: "Tu te censures encore. L'homme authentique dérange.",
+  12: "Tu vis pour aujourd'hui. L'héritage se construit maintenant.",
+};
 
   return (
     <View style={styles.container}>

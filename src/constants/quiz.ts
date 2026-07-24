@@ -1,5 +1,5 @@
 /**
- * Les 8 questions du diagnostic — Le Code Masculin
+ * Les 12 questions du diagnostic — Le Code Masculin
  * Chaque question est situationnelle et révèle un pilier
  * sans jamais nommer le pilier à l'utilisateur.
  */
@@ -115,6 +115,57 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
       { id: 'D', text: "Exprimes ton point de vue clairement — poliment, mais sans te censurer.", pillarScore: 4 },
     ],
   },
+
+  // ── 4 NOUVEAUX PILIERS ────────────────────────────────────────
+
+  {
+    id: 9,
+    pillarId: 3,
+    pillarName: 'Leadership',
+    question: "Ce soir, ta famille attend que tu décides où aller dîner. Personne ne propose. Tu...",
+    options: [
+      { id: 'A', text: "Demandes à chacun ce qu'il veut — tu ne veux imposer à personne.", pillarScore: 1 },
+      { id: 'B', text: "Attends que quelqu'un d'autre prenne l'initiative.", pillarScore: 1 },
+      { id: 'C', text: "Proposes 2 options et laisses choisir — tu as quand même cadré.", pillarScore: 3 },
+      { id: 'D', text: "Décides clairement d'un endroit, vérifies que ça convient, et c'est réglé.", pillarScore: 4 },
+    ],
+  },
+  {
+    id: 10,
+    pillarId: 4,
+    pillarName: 'Vulnérabilité Stratégique',
+    question: "Tu traverses une période difficile — stress, doutes, épuisement. Autour de toi, personne ne le sait. Tu...",
+    options: [
+      { id: 'A', text: "Gères seul — montrer que ça va mal, c'est montrer une faiblesse.", pillarScore: 1 },
+      { id: 'B', text: "Fais semblant que tout va bien même avec ta partenaire.", pillarScore: 1 },
+      { id: 'C', text: "En parles à ta partenaire ou un ami proche — pas pour te plaindre, pour être honnête.", pillarScore: 4 },
+      { id: 'D', text: "Attends que quelqu'un le remarque et te le demande.", pillarScore: 2 },
+    ],
+  },
+  {
+    id: 11,
+    pillarId: 9,
+    pillarName: 'Générosité',
+    question: "Un ami traverse une période difficile. Tu es occupé cette semaine. Tu...",
+    options: [
+      { id: 'A', text: "Attends qu'il demande — s'il a besoin, il saura te contacter.", pillarScore: 1 },
+      { id: 'B', text: "Envoies un message pour dire que tu penses à lui.", pillarScore: 2 },
+      { id: 'C', text: "Proposes un moment précis cette semaine — même 30 minutes.", pillarScore: 3 },
+      { id: 'D', text: "Crées le temps nécessaire — être là pour un ami, ça ne se reporte pas.", pillarScore: 4 },
+    ],
+  },
+  {
+    id: 12,
+    pillarId: 12,
+    pillarName: 'Héritage',
+    question: "Si tu disparaissais demain, ce que tu laisses derrière toi aujourd'hui, ce serait...",
+    options: [
+      { id: 'A', text: "Pas grand-chose — je n'y ai jamais vraiment réfléchi.", pillarScore: 1 },
+      { id: 'B', text: "Des biens matériels — une maison, de l'argent.", pillarScore: 2 },
+      { id: 'C', text: "Des souvenirs et quelques valeurs transmises à ceux que j'aime.", pillarScore: 3 },
+      { id: 'D', text: "Une empreinte consciente — des valeurs, une mission, quelque chose qui me survit.", pillarScore: 4 },
+    ],
+  },
 ];
 
 // Calcule les scores par pilier à partir des réponses
@@ -126,7 +177,6 @@ export function calculateScores(
     const answer = answers[q.id];
     if (answer) {
       const option = q.options.find((o) => o.id === answer);
-      // Normalise sur 10
       scores[q.pillarId] = ((option?.pillarScore ?? 1) / 4) * 10;
     }
   });

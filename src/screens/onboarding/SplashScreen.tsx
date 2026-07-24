@@ -16,6 +16,7 @@ export default function SplashScreen() {
     const timer = setTimeout(() => {
       router.replace('/(auth)/pacte');
     }, 2500);
+
     return () => clearTimeout(timer);
   }, []);
 
@@ -29,7 +30,6 @@ export default function SplashScreen() {
         <View style={styles.divider} />
         <Text style={styles.appName}>LE CODE MASCULIN</Text>
       </Animated.View>
-
       <View style={styles.trackWrapper}>
         <Animated.View style={[styles.trackFill, {
           width: lineWidth.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),

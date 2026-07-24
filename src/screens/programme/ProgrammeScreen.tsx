@@ -1,10 +1,11 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { router } from 'expo-router';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { ProgressBar, Badge } from '../../components/ui';
 import { PILLARS, PHASES, type Pillar, type PillarPhase } from '../../constants/pillars';
 import { getPillarProgress } from '../../constants/lessons';
+import { useAuthStore } from '../../store/authStore';
 
 type MockStatus = 'completed' | 'active' | 'locked';
 
@@ -16,7 +17,12 @@ const MOCK_STATUS: Record<number, MockStatus> = {
 };
 
 export default function ProgrammeScreen() {
+  const { user, entitlement, checkEntitlement } = useAuthStore();
   const phases: PillarPhase[] = ['fondation', 'identite', 'impact'];
+
+  useEffect(() => {
+    if (user?.id) checkEntitlement(user.id);
+  }, [user?.id]);
 
   const handlePillar = (pillar: Pillar) => {
     const status = MOCK_STATUS[pillar.id] ?? 'locked';
@@ -40,14 +46,12 @@ export default function ProgrammeScreen() {
         disabled={isLocked}
         activeOpacity={0.8}
       >
-        {/* Numéro */}
         <View style={[styles.pillarIconBg, { borderColor: isLocked ? Colors.border.default : pillar.color }]}>
           <Text style={[styles.pillarNum, { color: isLocked ? Colors.text.muted : pillar.color }]}>
             {pillar.id}
           </Text>
         </View>
 
-        {/* Infos */}
         <View style={styles.pillarInfo}>
           <Text style={[styles.pillarName, isLocked && styles.textMuted]}>{pillar.name}</Text>
           <Text style={styles.pillarTagline} numberOfLines={1}>
@@ -58,7 +62,6 @@ export default function ProgrammeScreen() {
           )}
         </View>
 
-        {/* Badge */}
         <View style={styles.pillarBadge}>
           {isCompleted && <Badge label="✓ COMPLÉTÉ" variant="completed" />}
           {isActive && <Badge label="EN COURS" variant="active" />}
@@ -68,10 +71,32 @@ export default function ProgrammeScreen() {
     );
   };
 
+  if (!entitlement.active) {
+    return (
+      <View style={styles.container}>
+        <View style={paywallStyles.container}>
+          <Text style={paywallStyles.icon}>🔒</Text>
+          <Text style={paywallStyles.title}>Le programme t'attend</Text>
+          <Text style={paywallStyles.subtitle}>
+            Débloque les 52 semaines et les 12 piliers du Code Masculin.
+          </Text>
+          <TouchableOpacity
+            style={paywallStyles.ctaButton}
+            onPress={() => Linking.openURL('https://pilierconscient.com/programme')}
+          >
+            <Text style={paywallStyles.ctaText}>Voir les plans</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/(tabs)/profil')}>
+            <Text style={paywallStyles.linkText}>J'ai déjà acheté — lier mon compte</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Mon Programme</Text>
           <View style={styles.globalProgress}>
@@ -148,4 +173,14 @@ const styles = StyleSheet.create({
   pillarBadge: { alignItems: 'flex-end' },
   textMuted: { color: Colors.text.muted },
   lockIcon: { fontSize: 16, opacity: 0.6 },
+});
+
+const paywallStyles = StyleSheet.create({
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
+  icon: { fontSize: 48, marginBottom: Spacing.lg },
+  title: { ...Typography.h2, color: Colors.text.primary, marginBottom: Spacing.sm, textAlign: 'center' },
+  subtitle: { ...Typography.body, color: Colors.text.secondary, textAlign: 'center', marginBottom: Spacing.xl },
+  ctaButton: { backgroundColor: Colors.brand.gold, borderRadius: Radius.md, paddingVertical: Spacing.md, paddingHorizontal: Spacing.xl, marginBottom: Spacing.md },
+  ctaText: { ...Typography.button, color: Colors.text.inverse },
+  linkText: { ...Typography.body, color: Colors.brand.gold, textAlign: 'center' },
 });

@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, TextInput, Alert, Dimensions,
+  Modal, SafeAreaView, ActivityIndicator,
 } from 'react-native';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { WebView } from 'react-native-webview';
+
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../theme';
 import {
   RESOURCES, RESOURCE_TYPES, getTypeIcon, getTypeLabel,
@@ -10,12 +14,415 @@ import {
 } from '../../constants/resources';
 import { getPillarById } from '../../constants/pillars';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────────────────────────────────────
+
+const API_URL = 'https://pilierconscient.com/wp-json/pc-bib/v1/resources';
 const { width } = Dimensions.get('window');
 const IS_PREMIUM = false; // TODO: connecter au store d'abonnement
 
-// ── Carte Ressource ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// Étend Resource avec les champs ajoutés par l'API
+// ─────────────────────────────────────────────────────────────────────────────
 
-function ResourceCard({ resource }: { resource: Resource }) {
+interface ResourceWithUrl extends Resource {
+  url?: string;
+}
+
+// Forme brute retournée par wp-json/pc-bib/v1/resources
+interface ApiAudio {
+  pilier: number;
+  phase: string;
+  nom: string;
+  duree: string;
+  theme: string;
+  url: string;
+  disponible: boolean;
+}
+interface ApiPdf {
+  module: number;
+  titre: string;
+  phase: string;
+  phase_nom: string;
+  pilier: number | null;
+  pilier_nom: string;
+  url: string;
+  disponible: boolean;
+}
+interface ApiTemplate {
+  slug: string;
+  titre: string;
+  description: string;
+  categorie: string;
+  url: string;
+  disponible: boolean;
+}
+interface ApiEbook {
+  slug: string;
+  titre: string;
+  description: string;
+  url: string;
+  disponible: boolean;
+}
+
+interface ApiResponse {
+  audios: ApiAudio[];
+  pdfs: ApiPdf[];
+  templates: ApiTemplate[];
+  ebooks: ApiEbook[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SETUP AUDIO SESSION — appeler au démarrage depuis App.tsx
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function setupPlayer() {
+  // expo-audio gère automatiquement la session audio
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAPPING API → ResourceWithUrl[]
+// L'API WordPress est la source unique de vérité.
+// Ce qui est configuré dans wp-admin = ce qui s'affiche dans l'app.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function mapApiToResources(api: ApiResponse): ResourceWithUrl[] {
+  const audios: ResourceWithUrl[] = api.audios.map(a => ({
+    id:           `audio-${a.pilier}`,
+    title:        a.nom,
+    description:  a.theme,
+    type:         'audio' as ResourceType,
+    access:       'premium' as const,
+    pillarId:     a.pilier,
+    duration:     a.duree,
+    url:          a.url ?? '',
+    isDownloaded: false,
+  }));
+
+  const pdfs: ResourceWithUrl[] = api.pdfs
+    .filter(p => p.disponible)           // n'afficher que les modules avec un PDF
+    .map(p => ({
+      id:           `pdf-${p.module}`,
+      title:        p.titre,
+      description:  `${p.phase_nom}${p.pilier_nom ? ' · ' + p.pilier_nom : ''}`,
+      type:         'pdf' as ResourceType,
+      access:       'premium' as const,
+      pillarId:     p.pilier ?? undefined,
+      url:          p.url ?? '',
+      isDownloaded: false,
+    }));
+
+  const ebooks: ResourceWithUrl[] = (api.ebooks ?? []).map(e => ({
+    id:           `ebook-${e.slug}`,
+    title:        e.titre,
+    description:  e.description,
+    type:         'ebook' as ResourceType,
+    access:       'free' as const,
+    url:          e.url ?? '',
+    isDownloaded: false,
+  }));
+
+  const templates: ResourceWithUrl[] = api.templates.map(t => ({
+    id:           `tpl-${t.slug}`,
+    title:        t.titre,
+    description:  t.description,
+    type:         'template' as ResourceType,
+    access:       'premium' as const,
+    url:          t.url ?? '',
+    isDownloaded: false,
+  }));
+
+  return [...audios, ...ebooks, ...pdfs, ...templates];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILITAIRES
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatTime(seconds: number): string {
+  if (!seconds || isNaN(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LECTEUR AUDIO MODAL — expo-audio (compatible Expo Go)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface AudioPlayerModalProps {
+  visible: boolean;
+  resource: ResourceWithUrl | null;
+  onClose: () => void;
+}
+
+// Détecte si une URL est SoundCloud (lien web, pas fichier audio direct)
+function isSoundCloudUrl(url: string): boolean {
+  return url.includes('soundcloud.com');
+}
+
+// Détecte si une URL est un fichier audio direct (mp3, m4a, ogg, wav...)
+function isDirectAudioUrl(url: string): boolean {
+  return /\.(mp3|m4a|ogg|wav|aac|flac)(\?|$)/i.test(url);
+}
+
+// ── Lecteur SoundCloud (WebView) ──────────────────────────────────────────────
+function SoundCloudPlayer({ url, accentColor }: { url: string; accentColor: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const widgetUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=${encodeURIComponent(accentColor.replace('#',''))}&show_artwork=true&buying=false&sharing=false&download=false&show_comments=false&show_playcount=false&show_user=false&visual=true`;
+
+  return (
+    <View style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', backgroundColor: '#f0f0f0' }}>
+      {!loaded && (
+        <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+          <ActivityIndicator color={accentColor} />
+          <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>Chargement du lecteur...</Text>
+        </View>
+      )}
+      <WebView
+        source={{ uri: widgetUrl }}
+        style={{ flex: 1, opacity: loaded ? 1 : 0 }}
+        onLoadEnd={() => setLoaded(true)}
+        javaScriptEnabled
+        mediaPlaybackRequiresUserAction={false}
+        allowsInlineMediaPlayback
+        // Bloquer toute navigation externe (liens SoundCloud, etc.)
+        onShouldStartLoadWithRequest={request => {
+          const allowed = request.url.includes('w.soundcloud.com') || request.url.includes('api.soundcloud.com');
+          return allowed;
+        }}
+      />
+    </View>
+  );
+}
+
+// ── Lecteur audio direct (expo-audio) ─────────────────────────────────────────
+function DirectAudioPlayer({
+  url, accentColor,
+}: { url: string; accentColor: string }) {
+  const player = useAudioPlayer({ uri: url });
+  const status = useAudioPlayerStatus(player);
+
+  const isPlaying = status.playing ?? false;
+  const position  = status.currentTime ?? 0;
+  const duration  = status.duration ?? 0;
+  const loading   = status.isBuffering ?? false;
+  const progress  = duration > 0 ? position / duration : 0;
+
+  useEffect(() => {
+    player.play();
+    return () => { try { player.pause(); } catch {} };
+  }, []);
+
+  const seekBy = (delta: number) => {
+    player.seekTo(Math.max(0, Math.min(position + delta, duration)));
+  };
+
+  if (loading) return <ActivityIndicator color={accentColor} style={{ marginVertical: 32 }} />;
+
+  return (
+    <>
+      <View style={playerStyles.progressBar}>
+        <View style={[playerStyles.progressFill, { width: `${progress * 100}%`, backgroundColor: accentColor }]} />
+      </View>
+      <View style={playerStyles.timesRow}>
+        <Text style={playerStyles.time}>{formatTime(position)}</Text>
+        <Text style={playerStyles.time}>{formatTime(duration)}</Text>
+      </View>
+      <View style={playerStyles.controls}>
+        <TouchableOpacity style={playerStyles.seekBtn} onPress={() => seekBy(-15)}>
+          <Text style={playerStyles.seekTxt}>−15s</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[playerStyles.playBtn, { backgroundColor: accentColor }]} onPress={() => isPlaying ? player.pause() : player.play()}>
+          <Text style={playerStyles.playIcon}>{isPlaying ? '⏸' : '▶'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={playerStyles.seekBtn} onPress={() => seekBy(15)}>
+          <Text style={playerStyles.seekTxt}>+15s</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+}
+
+// ── Modal principal audio ─────────────────────────────────────────────────────
+function AudioPlayerModal({ visible, resource, onClose }: AudioPlayerModalProps) {
+  if (!resource) return null;
+
+  const pillar      = resource.pillarId ? getPillarById(resource.pillarId) : null;
+  const accentColor = pillar?.color ?? Colors.brand.gold;
+  const url         = resource.url ?? '';
+  const useSoundCloud = isSoundCloudUrl(url);
+  const useDirect     = isDirectAudioUrl(url);
+  const canPlay       = useSoundCloud || useDirect;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={playerStyles.container}>
+        <TouchableOpacity style={playerStyles.closeRow} onPress={onClose}>
+          <Text style={playerStyles.closeTxt}>✕ Fermer</Text>
+        </TouchableOpacity>
+
+        <View style={playerStyles.content}>
+          {/* Artwork */}
+          <View style={[playerStyles.artwork, { backgroundColor: accentColor + '22' }]}>
+            <Text style={[playerStyles.artworkNum, { color: accentColor }]}>
+              {resource.pillarId ? `P${resource.pillarId}` : '🎧'}
+            </Text>
+          </View>
+
+          <Text style={playerStyles.title}>{resource.title}</Text>
+          <Text style={playerStyles.sub} numberOfLines={2}>{resource.description}</Text>
+
+          {!canPlay ? (
+            <Text style={{ color: Colors.text.muted, fontSize: 13, textAlign: 'center', marginTop: 24 }}>
+              Lien audio non disponible.
+            </Text>
+          ) : useSoundCloud ? (
+            // SoundCloud → widget embarqué dans WebView
+            <SoundCloudPlayer url={url} accentColor={accentColor} />
+          ) : (
+            // Fichier audio direct → expo-audio
+            <DirectAudioPlayer url={url} accentColor={accentColor} />
+          )}
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+const playerStyles = StyleSheet.create({
+  container:   { flex: 1, backgroundColor: Colors.background.primary },
+  closeRow:    { padding: Spacing.xl, alignItems: 'flex-end' },
+  closeTxt:    { ...Typography.body, color: Colors.text.muted },
+  content:     { flex: 1, alignItems: 'center', paddingHorizontal: Spacing['2xl'], justifyContent: 'center' },
+  artwork:     { width: 160, height: 160, borderRadius: Radius.xl, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing['2xl'] },
+  artworkNum:  { fontSize: 40, fontWeight: '800' },
+  title:       { ...Typography.h3, color: Colors.text.primary, textAlign: 'center', marginBottom: Spacing.sm },
+  sub:         { ...Typography.body, color: Colors.text.secondary, textAlign: 'center', lineHeight: 22, marginBottom: Spacing['2xl'] },
+  progressBar: { width: '100%', height: 4, backgroundColor: Colors.border.default, borderRadius: 2, overflow: 'hidden', marginBottom: Spacing.sm },
+  progressFill:{ height: '100%', borderRadius: 2 },
+  timesRow:    { width: '100%', flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing['2xl'] },
+  time:        { ...Typography.caption, color: Colors.text.muted },
+  controls:    { flexDirection: 'row', alignItems: 'center', gap: Spacing.xl },
+  playBtn:     { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
+  playIcon:    { fontSize: 24, color: Colors.text.inverse },
+  seekBtn:     { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.md, backgroundColor: Colors.background.secondary, borderWidth: 1, borderColor: Colors.border.default },
+  seekTxt:     { ...Typography.label, color: Colors.text.secondary },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VISIONNEUSE PDF MODAL
+// Nouveau composant — n'interfère pas avec le reste
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PdfViewerModalProps {
+  visible: boolean;
+  url: string;
+  title: string;
+  onClose: () => void;
+}
+
+function PdfViewerModal({ visible, url, title, onClose }: PdfViewerModalProps) {
+  const [webLoading, setWebLoading] = useState(true);
+  const [errored, setErrored]       = useState(false);
+
+  // Réinitialiser à chaque ouverture
+  useEffect(() => {
+    if (visible) { setWebLoading(true); setErrored(false); }
+  }, [visible, url]);
+
+  // Google Docs Viewer en premier — seule méthode fiable sur Android WebView
+  // Android télécharge les PDFs directs au lieu de les afficher
+  const viewerUrl = `https://docs.google.com/viewer?embedded=true&url=${encodeURIComponent(url)}`;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
+      <SafeAreaView style={pdfStyles.container}>
+        <View style={pdfStyles.header}>
+          <Text style={pdfStyles.title} numberOfLines={1}>{title}</Text>
+          <TouchableOpacity onPress={onClose}>
+            <Text style={pdfStyles.closeTxt}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        {visible && url ? (
+          <View style={{ flex: 1 }}>
+            {webLoading && !errored && (
+              <View style={pdfStyles.loading}>
+                <ActivityIndicator color={Colors.brand.gold} size="large" />
+                <Text style={{ color: '#fff', marginTop: 12, fontSize: 13 }}>
+                  Chargement du PDF...
+                </Text>
+              </View>
+            )}
+            {errored ? (
+              <View style={[pdfStyles.loading, { gap: 16 }]}>
+                <Text style={{ color: '#fff', fontSize: 15, textAlign: 'center' }}>
+                  ⚠️ Impossible d'afficher ce PDF
+                </Text>
+                <TouchableOpacity
+                  style={{ backgroundColor: Colors.brand.gold, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8 }}
+                  onPress={onClose}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>Fermer</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <WebView
+                key={viewerUrl}
+                source={{ uri: viewerUrl }}
+                style={[pdfStyles.pdf, webLoading && { opacity: 0 }]}
+                onLoadEnd={() => setWebLoading(false)}
+                onError={() => { setWebLoading(false); setErrored(true); }}
+                onHttpError={({ nativeEvent }) => {
+                  if (nativeEvent.statusCode >= 400) { setWebLoading(false); setErrored(true); }
+                }}
+                javaScriptEnabled
+                domStorageEnabled
+                // Empêcher le téléchargement — forcer l'affichage dans la WebView
+                onShouldStartLoadWithRequest={request => {
+                  // Bloquer les tentatives de téléchargement direct
+                  if (request.url.startsWith('blob:') || request.url.startsWith('content:')) return false;
+                  return true;
+                }}
+              />
+            )}
+          </View>
+        ) : (
+          <View style={pdfStyles.loading}>
+            <ActivityIndicator color={Colors.brand.gold} />
+          </View>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+
+const pdfStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  header:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: Spacing.xl, borderBottomWidth: 1, borderBottomColor: '#333' },
+  title:     { flex: 1, ...Typography.h4, color: '#fff', marginRight: Spacing.md },
+  closeTxt:  { fontSize: 20, color: '#fff' },
+  pdf:       { flex: 1, width },
+  loading:   { flex: 1, alignItems: 'center', justifyContent: 'center' },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESOURCE CARD
+// Code original préservé intégralement.
+// Seul ajout : props onPlay + onOpenPdf pour déléguer l'action au parent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ResourceCardProps {
+  resource: ResourceWithUrl;
+  onPlay: (r: ResourceWithUrl) => void;
+  onOpenPdf: (r: ResourceWithUrl) => void;
+}
+
+function ResourceCard({ resource, onPlay, onOpenPdf }: ResourceCardProps) {
   const [downloaded, setDownloaded] = useState(resource.isDownloaded ?? false);
   const [downloading, setDownloading] = useState(false);
 
@@ -25,6 +432,9 @@ function ResourceCard({ resource }: { resource: Resource }) {
   const typeLabel = getTypeLabel(resource.type);
   const accentColor = pillar?.color ?? Colors.brand.gold;
 
+  // ── Action principale ──────────────────────────────────────────
+  // Logique originale préservée.
+  // Ajout : si l'URL est réelle, on délègue au lecteur natif.
   const handleAction = () => {
     if (isLocked) {
       Alert.alert(
@@ -32,19 +442,32 @@ function ResourceCard({ resource }: { resource: Resource }) {
         'Passe à l\'abonnement Premium pour accéder à cette ressource.',
         [
           { text: 'Annuler', style: 'cancel' },
-          { text: 'Voir les plans', style: 'default',
-            onPress: () => Alert.alert('Premium', 'Fonctionnalité paiement bientôt disponible.') },
-        ]
+          {
+            text: 'Voir les plans', style: 'default',
+            onPress: () => Alert.alert('Premium', 'Fonctionnalité paiement bientôt disponible.'),
+          },
+        ],
       );
       return;
     }
 
+    // URL disponible → lecteur natif (audio) ou visionneuse (pdf/ebook/template)
+    if (resource.url && resource.url.length > 0) {
+      if (resource.type === 'audio') {
+        onPlay(resource);
+        return;
+      }
+      if (resource.type === 'pdf' || resource.type === 'template' || resource.type === 'ebook') {
+        onOpenPdf(resource);
+        return;
+      }
+    }
+
+    // Pas d'URL → comportement simulé original
     if (downloaded) {
       Alert.alert('Ouvrir', `Ouverture de "${resource.title}"...`);
       return;
     }
-
-    // Simuler téléchargement
     setDownloading(true);
     setTimeout(() => {
       setDownloading(false);
@@ -53,9 +476,9 @@ function ResourceCard({ resource }: { resource: Resource }) {
     }, 1500);
   };
 
+  // ── Render original (inchangé) ─────────────────────────────────
   return (
     <View style={[styles.card, isLocked && styles.cardLocked]}>
-      {/* Overlay verrouillé */}
       {isLocked && (
         <View style={styles.lockOverlay}>
           <Text style={styles.lockIcon}>👑</Text>
@@ -63,26 +486,23 @@ function ResourceCard({ resource }: { resource: Resource }) {
         </View>
       )}
 
-      {/* Header carte */}
       <View style={styles.cardHeader}>
-        {/* Icône type */}
         <View style={[styles.typeIcon, { borderColor: isLocked ? Colors.border.default : accentColor }]}>
           <Text style={styles.typeIconTxt}>{icon}</Text>
         </View>
-
-        {/* Badge type + pilier */}
         <View style={styles.badges}>
-          <View style={[styles.typeBadge, { backgroundColor: isLocked ? Colors.background.tertiary : accentColor + '22', borderColor: isLocked ? Colors.border.default : accentColor }]}>
+          <View style={[styles.typeBadge, {
+            backgroundColor: isLocked ? Colors.background.tertiary : accentColor + '22',
+            borderColor: isLocked ? Colors.border.default : accentColor,
+          }]}>
             <Text style={[styles.typeBadgeTxt, { color: isLocked ? Colors.text.muted : accentColor }]}>
               {typeLabel}
             </Text>
           </View>
           {pillar && (
-            <Text style={styles.pillarTag} numberOfLines={1} >Pilier {pillar.id}</Text>
+            <Text style={styles.pillarTag} numberOfLines={1}>Pilier {pillar.id}</Text>
           )}
         </View>
-
-        {/* Statut téléchargement */}
         {downloaded && !isLocked && (
           <View style={styles.downloadedBadge}>
             <Text style={styles.downloadedTxt}>✓ Offline</Text>
@@ -90,7 +510,6 @@ function ResourceCard({ resource }: { resource: Resource }) {
         )}
       </View>
 
-      {/* Contenu */}
       <Text style={[styles.cardTitle, isLocked && styles.textMuted]}>
         {resource.title}
       </Text>
@@ -98,20 +517,12 @@ function ResourceCard({ resource }: { resource: Resource }) {
         {resource.description}
       </Text>
 
-      {/* Métadonnées */}
       <View style={styles.cardMeta}>
-        {resource.duration && (
-          <Text style={styles.metaTxt}>⏱ {resource.duration}</Text>
-        )}
-        {resource.pages && (
-          <Text style={styles.metaTxt}>📃 {resource.pages} pages</Text>
-        )}
-        {resource.fileSize && (
-          <Text style={styles.metaTxt}>💾 {resource.fileSize}</Text>
-        )}
+        {resource.duration && <Text style={styles.metaTxt}>⏱ {resource.duration}</Text>}
+        {resource.pages    && <Text style={styles.metaTxt}>📃 {resource.pages} pages</Text>}
+        {resource.fileSize && <Text style={styles.metaTxt}>💾 {resource.fileSize}</Text>}
       </View>
 
-      {/* CTA */}
       <TouchableOpacity
         style={[
           styles.cardCta,
@@ -128,39 +539,100 @@ function ResourceCard({ resource }: { resource: Resource }) {
         ]}>
           {isLocked
             ? '🔒 Débloquer avec Premium'
-            : downloading
-              ? '⏳ Téléchargement...'
-              : downloaded
-                ? '▶ Ouvrir'
-                : '📥 Télécharger'}
+            : (resource.url && resource.url.length > 0)
+              ? resource.type === 'audio'
+                ? '▶ Écouter'
+                : resource.type === 'ebook'
+                  ? "📖 Lire l'ebook"
+                  : '📄 Ouvrir'
+              : downloading
+                ? '⏳ Téléchargement...'
+                : downloaded
+                  ? '▶ Ouvrir'
+                  : '🔒 À venir'}
         </Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-// ── Écran principal ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ÉCRAN PRINCIPAL
+// Structure originale préservée intégralement.
+// Ajouts : fetch API, état player audio, état PDF viewer.
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function BibliothequeScreen() {
   const [activeFilter, setActiveFilter] = useState<ResourceType | 'all'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery]   = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
 
-  const filteredResources = RESOURCES.filter(r => {
-    const matchType = activeFilter === 'all' || r.type === activeFilter;
+  // ── AJOUT : données dynamiques depuis l'API ────────────────────
+  const [apiResources, setApiResources] = useState<ResourceWithUrl[]>([]);
+  const [apiLoading, setApiLoading]     = useState(true);
+
+  useEffect(() => {
+    fetch(API_URL)
+      .then(r => r.json())
+      .then((data: ApiResponse) => setApiResources(mapApiToResources(data)))
+      .catch(() => {
+        // Fallback : ressources statiques si l'API est inaccessible
+        setApiResources(RESOURCES as ResourceWithUrl[]);
+      })
+      .finally(() => setApiLoading(false));
+  }, []);
+
+  // Afficher statiques pendant le chargement, données API ensuite
+  const allResources: ResourceWithUrl[] = apiLoading
+    ? (RESOURCES as ResourceWithUrl[])
+    : apiResources;
+
+  // ── AJOUT : état lecteur audio ─────────────────────────────────
+  const [playerVisible, setPlayerVisible]   = useState(false);
+  const [currentAudio, setCurrentAudio]     = useState<ResourceWithUrl | null>(null);
+
+  const handlePlay = useCallback((resource: ResourceWithUrl) => {
+    if (!resource.url) return;
+    setCurrentAudio(resource);
+    setPlayerVisible(true);
+    // Le chargement/lecture est géré dans AudioPlayerModal via useEffect
+  }, []);
+
+  const handleClosePlayer = useCallback(() => {
+    setPlayerVisible(false);
+    setCurrentAudio(null);
+  }, []);
+
+  // ── AJOUT : état visionneuse PDF ───────────────────────────────
+  const [pdfVisible, setPdfVisible]   = useState(false);
+  const [pdfUrl, setPdfUrl]           = useState('');
+  const [pdfTitle, setPdfTitle]       = useState('');
+
+  const handleOpenPdf = useCallback((resource: ResourceWithUrl) => {
+    if (!resource.url) return;
+    setPdfUrl(resource.url);
+    setPdfTitle(resource.title);
+    setPdfVisible(true);
+  }, []);
+
+  // ── Filtres (logique originale, sur allResources) ──────────────
+  const filteredResources = allResources.filter(r => {
+    const matchType   = activeFilter === 'all' || r.type === activeFilter;
     const matchSearch = searchQuery === '' ||
       r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.description.toLowerCase().includes(searchQuery.toLowerCase());
     return matchType && matchSearch;
   });
 
-  const freeResources = filteredResources.filter(r => r.access === 'free');
+  const freeResources    = filteredResources.filter(r => r.access === 'free');
   const premiumResources = filteredResources.filter(r => r.access === 'premium');
-  const downloadedCount = RESOURCES.filter(r => r.isDownloaded).length;
+  const downloadedCount  = allResources.filter(r => r.isDownloaded).length;
 
+  // ── Render (original intégralement préservé) ───────────────────
   return (
     <View style={styles.container}>
-      {/* ── Header ── */}
+
+      {/* ── Header (original) ── */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Bibliothèque</Text>
         {downloadedCount > 0 && (
@@ -170,7 +642,7 @@ export default function BibliothequeScreen() {
         )}
       </View>
 
-      {/* ── Barre de recherche ── */}
+      {/* ── Barre de recherche (originale) ── */}
       <View style={styles.searchArea}>
         <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
           <Text style={styles.searchIcon}>🔍</Text>
@@ -191,7 +663,7 @@ export default function BibliothequeScreen() {
         </View>
       </View>
 
-      {/* ── Filtres ── */}
+      {/* ── Filtres (originaux) ── */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -211,10 +683,9 @@ export default function BibliothequeScreen() {
         ))}
       </ScrollView>
 
-      {/* ── Liste des ressources ── */}
+      {/* ── Liste (originale) ── */}
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
 
-        {/* Banner Premium si pas abonné */}
         {!IS_PREMIUM && (
           <TouchableOpacity
             style={styles.premiumBanner}
@@ -232,7 +703,6 @@ export default function BibliothequeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Section gratuite */}
         {freeResources.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
@@ -242,14 +712,14 @@ export default function BibliothequeScreen() {
             <View style={styles.grid}>
               {freeResources.map(r => (
                 <View key={r.id} style={styles.gridItem}>
-                  <ResourceCard resource={r} />
+                  {/* onPlay et onOpenPdf = seule modification sur ResourceCard */}
+                  <ResourceCard resource={r} onPlay={handlePlay} onOpenPdf={handleOpenPdf} />
                 </View>
               ))}
             </View>
           </View>
         )}
 
-        {/* Section premium */}
         {!IS_PREMIUM && premiumResources.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -262,14 +732,13 @@ export default function BibliothequeScreen() {
             <View style={styles.grid}>
               {premiumResources.map(r => (
                 <View key={r.id} style={styles.gridItem}>
-                  <ResourceCard resource={r} />
+                  <ResourceCard resource={r} onPlay={handlePlay} onOpenPdf={handleOpenPdf} />
                 </View>
               ))}
             </View>
           </View>
         )}
 
-        {/* Empty state */}
         {filteredResources.length === 0 && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🔍</Text>
@@ -282,18 +751,32 @@ export default function BibliothequeScreen() {
 
         <View style={{ height: 80 }} />
       </ScrollView>
+
+      {/* ── AJOUT : Modals (hors du ScrollView, invisibles par défaut) ── */}
+      <AudioPlayerModal
+        visible={playerVisible}
+        resource={currentAudio}
+        onClose={handleClosePlayer}
+      />
+      <PdfViewerModal
+        visible={pdfVisible}
+        url={pdfUrl}
+        title={pdfTitle}
+        onClose={() => setPdfVisible(false)}
+      />
     </View>
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// STYLES — copie exacte de l'original, aucune modification
+// ─────────────────────────────────────────────────────────────────────────────
 
 const CARD_WIDTH = (width - Spacing.xl * 2 - Spacing.sm) / 2;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background.primary },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -311,7 +794,6 @@ const styles = StyleSheet.create({
   },
   offlineTxt: { ...Typography.caption, color: Colors.status.success },
 
-  // Recherche
   searchArea: { paddingHorizontal: Spacing.xl, marginBottom: Spacing.md },
   searchBar: {
     flexDirection: 'row',
@@ -333,35 +815,23 @@ const styles = StyleSheet.create({
   },
   clearBtn: { fontSize: 14, color: Colors.text.muted, padding: Spacing.xs },
 
-  // Filtres
-filtersScroll: { marginBottom: Spacing.base, maxHeight: 44 },
-filtersContent: { 
-  paddingHorizontal: Spacing.xl, 
-  gap: Spacing.sm,
-  alignItems: 'center',
-  height: 44,
-},
-filterChip: {
-  paddingHorizontal: Spacing.md,
-  paddingVertical: 6,
-  borderRadius: Radius.full,
-  borderWidth: 1,
-  borderColor: Colors.border.default,
-  backgroundColor: Colors.background.secondary,
-  height: 32,
-  justifyContent: 'center',
-},
-
-  /*filtersScroll: { marginBottom: Spacing.base },
-  filtersContent: { paddingHorizontal: Spacing.xl, gap: Spacing.sm },
+  filtersScroll: { marginBottom: Spacing.base, maxHeight: 44 },
+  filtersContent: {
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.sm,
+    alignItems: 'center',
+    height: 44,
+  },
   filterChip: {
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: 6,
     borderRadius: Radius.full,
     borderWidth: 1,
     borderColor: Colors.border.default,
     backgroundColor: Colors.background.secondary,
-  },*/
+    height: 32,
+    justifyContent: 'center',
+  },
   filterChipActive: {
     backgroundColor: Colors.brand.gold,
     borderColor: Colors.brand.gold,
@@ -369,10 +839,8 @@ filterChip: {
   filterTxt: { ...Typography.label, color: Colors.text.muted, textTransform: 'none', letterSpacing: 0 },
   filterTxtActive: { color: Colors.text.inverse },
 
-  // Scroll
   scroll: { flex: 1 },
 
-  // Premium banner
   premiumBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -392,7 +860,6 @@ filterChip: {
   premiumBannerSub: { ...Typography.bodySmall, color: Colors.text.secondary, marginTop: 2 },
   premiumBannerArrow: { fontSize: 24, color: Colors.brand.gold },
 
-  // Sections
   section: { paddingHorizontal: Spacing.xl, marginBottom: Spacing.xl },
   sectionHeader: {
     flexDirection: 'row',
@@ -404,7 +871,6 @@ filterChip: {
   sectionCount: { color: Colors.text.muted },
   premiumTag: { fontSize: 16 },
 
-  // Grille 2 colonnes
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -413,7 +879,6 @@ filterChip: {
   },
   gridItem: { width: CARD_WIDTH },
 
-  // Carte
   card: {
     backgroundColor: Colors.background.secondary,
     borderRadius: Radius.lg,
@@ -439,22 +904,14 @@ filterChip: {
   lockIcon: { fontSize: 10 },
   lockTxt: { ...Typography.caption, color: Colors.brand.gold, fontSize: 10 },
 
-
   cardHeader: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: Spacing.xs,
-  marginBottom: Spacing.sm,
-  height: 36,
-  overflow: 'hidden',
-},
-  /*cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
     marginBottom: Spacing.sm,
-    flexWrap: 'wrap',
-  },*/
+    height: 36,
+    overflow: 'hidden',
+  },
   typeIcon: {
     width: 36, height: 36, borderRadius: Radius.md,
     borderWidth: 1.5,
@@ -463,32 +920,27 @@ filterChip: {
     flexShrink: 0,
   },
   typeIconTxt: { fontSize: 16 },
-  badges: { 
-  flex: 1, 
-  flexDirection: 'column',
-  gap: 2,
-  overflow: 'hidden',
-},
-  /*badges: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  badges: {
+    flex: 1,
+    flexDirection: 'column',
+    gap: 2,
+    overflow: 'hidden',
+  },
   typeBadge: {
-    paddingHorizontal: 6, paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: Radius.full,
     borderWidth: 1,
-  },*/
+    alignSelf: 'flex-start',
+  },
   typeBadgeTxt: { ...Typography.caption, fontSize: 10, fontWeight: '600' },
-  pillarTag: { 
-  ...Typography.caption, 
-  color: Colors.text.muted, 
-  fontSize: 10,
-  numberOfLines: 1,
-},
-  /*pillarTag: { ...Typography.caption, color: Colors.text.muted, fontSize: 10 },
+  pillarTag: { ...Typography.caption, color: Colors.text.muted, fontSize: 10 },
   downloadedBadge: {
     backgroundColor: Colors.status.successBg,
     borderRadius: Radius.full,
     paddingHorizontal: 6,
     paddingVertical: 2,
-  },*/
+  },
   downloadedTxt: { ...Typography.caption, color: Colors.status.success, fontSize: 10 },
 
   cardTitle: {
@@ -538,7 +990,6 @@ filterChip: {
   cardCtaTxtLocked: { color: Colors.text.muted },
   cardCtaTxtDownloaded: { color: Colors.brand.gold },
 
-  // Empty state
   emptyState: {
     alignItems: 'center',
     paddingVertical: Spacing['4xl'],

@@ -12,6 +12,7 @@ export default function QuizScreen() {
   const [selected, setSelected] = useState<'A' | 'B' | 'C' | 'D' | null>(null);
   const btnOpacity = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const scrollRef = useRef<ScrollView>(null);
 
   const q = QUIZ_QUESTIONS[currentIndex];
 
@@ -21,22 +22,40 @@ export default function QuizScreen() {
   };
 
   const handleNext = () => {
-    if (!selected) return;
-    const newAnswers = { ...answers, [q.id]: selected };
-    setAnswers(newAnswers);
+  if (!selected) return;
+  const newAnswers = { ...answers, [q.id]: selected };
+  setAnswers(newAnswers);
 
-    Animated.timing(fadeAnim, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => {
-      if (currentIndex < TOTAL - 1) {
-        setCurrentIndex(i => i + 1);
-        setSelected(null);
-        btnOpacity.setValue(0);
-        fadeAnim.setValue(1);
-      } else {
-        const scores = calculateScores(newAnswers);
-        router.replace({ pathname: '/(auth)/diagnostic-transition', params: { scores: JSON.stringify(scores) } });
-      }
-    });
-  };
+  // Fade out
+  Animated.timing(fadeAnim, {
+    toValue: 0,
+    duration: 180,
+    useNativeDriver: true,
+  }).start(() => {
+    if (currentIndex < TOTAL - 1) {
+      setCurrentIndex(i => i + 1);
+      setSelected(null);
+      btnOpacity.setValue(0);
+
+      // Fade in APRÈS le changement d'état
+     requestAnimationFrame(() => {
+  scrollRef.current?.scrollTo({ y: 0, animated: false });
+  Animated.timing(fadeAnim, {
+    toValue: 1,
+    duration: 180,
+    useNativeDriver: true,
+  }).start();
+});
+
+    } else {
+      const scores = calculateScores(newAnswers);
+      router.replace({
+        pathname: '/(auth)/diagnostic-transition',
+        params: { scores: JSON.stringify(scores) },
+      });
+    }
+  });
+};
 
   return (
     <View style={styles.container}>
@@ -57,7 +76,7 @@ export default function QuizScreen() {
       <Text style={styles.counter}>Question {currentIndex + 1} sur {TOTAL}</Text>
 
       <Animated.View style={[styles.body, { opacity: fadeAnim }]}>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
           <Text style={styles.question}>{q.question}</Text>
           <View style={styles.options}>
             {q.options.map(opt => {

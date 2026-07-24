@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Typography, Spacing } from '../../theme';
 
 const STEPS = [
-  'Traitement de tes 8 réponses',
+  'Traitement de tes 12 réponses',
   'Identification de tes 3 piliers prioritaires',
   'Construction de ton Code de départ',
 ];

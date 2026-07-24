@@ -27,7 +27,8 @@
       "package": "com.pilierconscient.lecodemascuiin"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-audio"
     ],
     "scheme": "lecodemascuiin",
     "experiments": {
