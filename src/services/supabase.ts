@@ -153,7 +153,7 @@ export const updateStreak = async (userId: string) => {
 
 export const getUserProgress = async (userId: string) => {
   const { data, error } = await supabase
-    .from('user_progress')
+    .from('lesson_completions')
     .select('*')
     .eq('user_id', userId);
   return { data, error };
@@ -165,13 +165,13 @@ export const markLessonCompleted = async (
   lessonId: string
 ) => {
   const { data, error } = await supabase
-    .from('user_progress')
+    .from('lesson_completions')
     .upsert({
       user_id: userId,
       pillar_id: pillarId,
       lesson_id: lessonId,
       completed_at: new Date().toISOString(),
-    })
+    }, { onConflict: 'user_id,lesson_id' })
     .select()
     .single();
   return { data, error };

@@ -1,7 +1,6 @@
 import { create } from 'zustand';
-import { supabase, getUserProfile, getUserStreak, getAiQuota } from '../services/supabase';
+import { supabase, getUserProfile, getUserStreak, getAiQuota, getUserProgress, markLessonCompleted } from '../services/supabase';
 import { linkAccount, checkEntitlementStatus } from '../services/entitlements';
-
 
 interface UserProfile {
   id: string;
@@ -29,15 +28,18 @@ interface AuthState {
   aiQuota: AiQuota | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  userProgress: { pillar_id: number; lesson_id: string; completed_at: string }[];
+  loadUserProgress: (userId: string) => Promise<void>;
+  completeLessonAndRefresh: (userId: string, pillarId: number, lessonId: string) => Promise<void>;
   setUser: (user: UserProfile) => void;
   loadUser: (userId: string) => Promise<void>;
   setLoading: (loading: boolean) => void;
   logout: () => Promise<void>;
   refreshQuota: (userId: string) => Promise<void>;
   refreshStreak: (userId: string) => Promise<void>;
-entitlement: { active: boolean; planType: string | null };
-checkEntitlement: (userId: string) => Promise<void>;
-linkPurchaseAccount: (email: string, userId: string) => Promise<{ linked: boolean; reason?: string }>;
+  entitlement: { active: boolean; planType: string | null };
+  checkEntitlement: (userId: string) => Promise<void>;
+  linkPurchaseAccount: (email: string, userId: string) => Promise<{ linked: boolean; reason?: string }>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -47,7 +49,22 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
   isAuthenticated: false,
 
-  // Action directe pour setter l'utilisateur sans passer par Supabase
+  userProgress: [],
+
+  loadUserProgress: async (userId: string) => {
+    const { data } = await getUserProgress(userId);
+    set({ userProgress: data ?? [] });
+  },
+
+  completeLessonAndRefresh: async (userId: string, pillarId: number, lessonId: string) => {
+    console.log('completeLessonAndRefresh appelé:', { userId, pillarId, lessonId });
+    const result = await markLessonCompleted(userId, pillarId, lessonId);
+    console.log('Résultat markLessonCompleted:', JSON.stringify(result));
+    const { data } = await getUserProgress(userId);
+    console.log('userProgress après refresh:', JSON.stringify(data));
+    set({ userProgress: data ?? [] });
+  },
+
   setUser: (user: UserProfile) => set({ user, isAuthenticated: true, isLoading: false }),
 
   loadUser: async (userId: string) => {
@@ -55,17 +72,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await new Promise(r => setTimeout(r, 300));
 
-      const [streakRes, quotaRes] = await Promise.all([
+      const [streakRes, quotaRes, progressRes] = await Promise.all([
         getUserStreak(userId),
         getAiQuota(userId),
+        getUserProgress(userId),
       ]);
 
       set((state) => ({
-        // Garder le user déjà dans le store (setUser appelé avant)
-        // et juste ajouter streak + quota
         user: state.user ?? null,
         streak: streakRes.data,
         aiQuota: quotaRes.data,
+        userProgress: progressRes.data ?? [],
         isAuthenticated: true,
         isLoading: false,
       }));
@@ -99,28 +116,28 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   entitlement: { active: false, planType: null },
 
-checkEntitlement: async (userId: string) => {
-  try {
-    const result = await checkEntitlementStatus(userId);
-    set({ entitlement: { active: result.active, planType: result.planType } });
-  } catch (err) {
-    console.error('Erreur checkEntitlement:', err);
-  }
-},
-
-linkPurchaseAccount: async (email: string, userId: string) => {
-  try {
-    const result = await linkAccount(email, userId);
-    if (result.linked) {
-      set({ entitlement: { active: true, planType: null } });
-      await useAuthStore.getState().refreshQuota(userId);
+  checkEntitlement: async (userId: string) => {
+    try {
+      const result = await checkEntitlementStatus(userId);
+      set({ entitlement: { active: result.active, planType: result.planType } });
+    } catch (err) {
+      console.error('Erreur checkEntitlement:', err);
     }
-    return result;
-  } catch (err) {
-    console.error('Erreur linkPurchaseAccount:', err);
-    return { linked: false, reason: 'network_error' };
-  }
-},
+  },
+
+  linkPurchaseAccount: async (email: string, userId: string) => {
+    try {
+      const result = await linkAccount(email, userId);
+      if (result.linked) {
+        set({ entitlement: { active: true, planType: null } });
+        await useAuthStore.getState().refreshQuota(userId);
+      }
+      return result;
+    } catch (err) {
+      console.error('Erreur linkPurchaseAccount:', err);
+      return { linked: false, reason: 'network_error' };
+    }
+  },
 }));
 
 // Sélecteurs

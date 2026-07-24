@@ -1,41 +1,46 @@
-import React, { useEffect } from 'react';
+import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { ProgressBar, Badge } from '../../components/ui';
 import { PILLARS, PHASES, type Pillar, type PillarPhase } from '../../constants/pillars';
-import { getPillarProgress } from '../../constants/lessons';
 import { useAuthStore } from '../../store/authStore';
-
-type MockStatus = 'completed' | 'active' | 'locked';
-
-const MOCK_STATUS: Record<number, MockStatus> = {
-  1: 'completed', 2: 'active',
-  3: 'locked', 4: 'locked', 5: 'locked', 6: 'locked',
-  7: 'locked', 8: 'locked', 9: 'locked', 10: 'locked',
-  11: 'locked', 12: 'locked',
-};
+import {
+  getCompletedLessonIds,
+  getPillarStatus,
+  getPillarProgressReal,
+  getOverallProgress,
+} from '../../constants/progression';
 
 export default function ProgrammeScreen() {
-  const { user, entitlement, checkEntitlement } = useAuthStore();
+  const { user, entitlement, checkEntitlement, userProgress, loadUserProgress } = useAuthStore();
   const phases: PillarPhase[] = ['fondation', 'identite', 'impact'];
 
-  useEffect(() => {
-    if (user?.id) checkEntitlement(user.id);
-  }, [user?.id]);
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        checkEntitlement(user.id);
+        loadUserProgress(user.id);
+      }
+    }, [user?.id])
+  );
+
+  const completedIds = getCompletedLessonIds(userProgress);
+  const { completedWeeks, totalWeeks } = getOverallProgress(completedIds);
 
   const handlePillar = (pillar: Pillar) => {
-    const status = MOCK_STATUS[pillar.id] ?? 'locked';
+    const status = getPillarStatus(pillar.id, completedIds);
     if (status === 'locked') return;
     router.push({ pathname: '/pilier', params: { pillarId: String(pillar.id) } });
   };
 
   const renderPillarCard = (pillar: Pillar) => {
-    const status = MOCK_STATUS[pillar.id] ?? 'locked';
+    const status = getPillarStatus(pillar.id, completedIds);
     const isLocked = status === 'locked';
     const isCompleted = status === 'completed';
     const isActive = status === 'active';
-    const { completed, total } = getPillarProgress(pillar.id);
+    const { completed, total } = getPillarProgressReal(pillar.id, completedIds);
     const progress = total > 0 ? completed / total : 0;
 
     return (
@@ -100,8 +105,8 @@ export default function ProgrammeScreen() {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Mon Programme</Text>
           <View style={styles.globalProgress}>
-            <Text style={styles.progressLabel}>Semaine 8 / 52</Text>
-            <ProgressBar progress={8 / 52} height={4} style={{ marginTop: Spacing.xs }} />
+            <Text style={styles.progressLabel}>Semaine {completedWeeks} / {totalWeeks}</Text>
+            <ProgressBar progress={completedWeeks / totalWeeks} height={4} style={{ marginTop: Spacing.xs }} />
           </View>
         </View>
 

@@ -7,28 +7,32 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../theme';
 import { getLessonById, formatDuration } from '../../constants/lessons';
 import { getPillarById } from '../../constants/pillars';
+import { useAuthStore } from '../../store/authStore';
+import { getNextLesson, getLessonStatus, getCompletedLessonIds } from '../../constants/progression';
 
 const { width } = Dimensions.get('window');
 type Tab = 'resume' | 'defi' | 'notes';
 
-/**
- * SCREEN — Lecteur de Leçon
- * Lecteur audio simulé + résumé + défi + notes
- */
 export default function LeconScreen() {
   const { lessonId } = useLocalSearchParams<{ lessonId: string }>();
   const lesson = getLessonById(lessonId ?? '');
   const pillar = lesson ? getPillarById(lesson.pillarId) : null;
+  const { user, userProgress, completeLessonAndRefresh } = useAuthStore();
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);        // 0 à 1
-  const [elapsed, setElapsed] = useState(0);           // secondes
+  const [progress, setProgress] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>('resume');
   const [defiDone, setDefiDone] = useState(false);
   const [note, setNote] = useState('');
+  const [completing, setCompleting] = useState(false);
 
   const progressAnim = useRef(new Animated.Value(0)).current;
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const isCompleted = lesson
+    ? userProgress.some((p) => p.lesson_id === lesson.id)
+    : false;
 
   useEffect(() => {
     return () => {
@@ -52,11 +56,9 @@ export default function LeconScreen() {
 
   const handlePlayPause = () => {
     if (isPlaying) {
-      // Pause
       if (intervalRef.current) clearInterval(intervalRef.current);
       setIsPlaying(false);
     } else {
-      // Play
       setIsPlaying(true);
       intervalRef.current = setInterval(() => {
         setElapsed(prev => {
@@ -96,9 +98,46 @@ export default function LeconScreen() {
     setDefiDone(true);
     Alert.alert(
       '💪 Défi accompli !',
-      'Excellent. Chaque défi complété t\'rapproche de l\'homme que tu construis.',
+      "Excellent. Chaque défi complété t'rapproche de l'homme que tu construis.",
       [{ text: 'Continuer', style: 'default' }]
     );
+  };
+
+  const handleCompleteAndNext = async () => {
+    if (!user?.id) return;
+    setCompleting(true);
+    try {
+    if (!isCompleted) {
+      await completeLessonAndRefresh(user.id, lesson.pillarId, lesson.id);
+    }
+
+    const next = getNextLesson(lesson.id);
+    if (!next) {
+      Alert.alert('🎉 Félicitations', 'Tu as terminé la dernière leçon disponible !', [
+        { text: 'Retour au programme', onPress: () => router.push('/(tabs)/programme') },
+      ]);
+      return;
+    }
+
+    const completedIds = getCompletedLessonIds(useAuthStore.getState().userProgress);
+    const nextStatus = getLessonStatus(next, completedIds, useAuthStore.getState().userProgress);
+
+    if (nextStatus === 'locked') {
+      Alert.alert(
+        '🔒 Leçon verrouillée',
+        "La prochaine leçon se débloque 7 jours après avoir terminé celle-ci. Reviens bientôt !",
+        [{ text: 'Retour au programme', onPress: () => router.push('/(tabs)/programme') }]
+      );
+      return;
+    }
+
+    router.replace({ pathname: '/lecon', params: { lessonId: next.id } });
+    } catch (err) {
+    console.error('Erreur completeLessonAndRefresh:', err);
+    Alert.alert('Erreur', "Impossible d'enregistrer ta progression pour le moment.");
+    } finally {
+    setCompleting(false);
+    }
   };
 
   const formatTime = (s: number) => {
@@ -109,58 +148,51 @@ export default function LeconScreen() {
 
   return (
     <View style={styles.container}>
-      {/* ── Header navigation ── */}
       <View style={styles.navBar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.navTitle} numberOfLines={1}>
-          Leçon {lesson.order} / {lesson.pillarId === 2 ? '4' : '2'}
+          Semaine {lesson.weekNumber}
         </Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-
-        {/* ── Player ── */}
         <View style={styles.playerCard}>
-          {/* Visual pilier */}
           <View style={[styles.playerVisual, { borderColor: phaseColor }]}>
             <Text style={[styles.playerPillarNum, { color: phaseColor }]}>{pillar.id}</Text>
             <Text style={styles.playerPillarName}>{pillar.name}</Text>
           </View>
 
-          {/* Titre */}
           <Text style={styles.playerLabel}>PILIER {pillar.id} · {pillar.name.toUpperCase()}</Text>
           <Text style={styles.playerTitle}>{lesson.title}</Text>
           <Text style={styles.playerMeta}>
             {lesson.type === 'audio' ? '🎧 Audio' : '▶️ Vidéo'} · {formatDuration(duration)}
           </Text>
 
-          {/* Scrubber */}
+          {isCompleted && (
+            <View style={styles.completedBadge}>
+              <Text style={styles.completedBadgeTxt}>✓ Leçon complétée</Text>
+            </View>
+          )}
+
           <View style={styles.scrubberArea}>
             <View style={styles.scrubberTrack}>
               <Animated.View
                 style={[
                   styles.scrubberFill,
                   {
-                    width: progressAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0%', '100%'],
-                    }),
+                    width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
                     backgroundColor: phaseColor,
                   },
                 ]}
               />
-              {/* Knob */}
               <Animated.View
                 style={[
                   styles.scrubberKnob,
                   {
-                    left: progressAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0%', '97%'],
-                    }),
+                    left: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '97%'] }),
                     backgroundColor: phaseColor,
                   },
                 ]}
@@ -172,16 +204,12 @@ export default function LeconScreen() {
             </View>
           </View>
 
-          {/* Contrôles */}
           <View style={styles.controls}>
             <TouchableOpacity onPress={handleRewind} style={styles.controlBtn}>
               <Text style={styles.controlTxt}>⟨15</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              onPress={handlePlayPause}
-              style={[styles.playBtn, { backgroundColor: phaseColor }]}
-            >
+            <TouchableOpacity onPress={handlePlayPause} style={[styles.playBtn, { backgroundColor: phaseColor }]}>
               <Text style={styles.playBtnTxt}>{isPlaying ? '❙❙' : '▶'}</Text>
             </TouchableOpacity>
 
@@ -191,7 +219,6 @@ export default function LeconScreen() {
           </View>
         </View>
 
-        {/* ── Tabs ── */}
         <View style={styles.tabs}>
           {(['resume', 'defi', 'notes'] as Tab[]).map(tab => (
             <TouchableOpacity
@@ -206,9 +233,7 @@ export default function LeconScreen() {
           ))}
         </View>
 
-        {/* ── Contenu des tabs ── */}
         <View style={styles.tabContent}>
-
           {activeTab === 'resume' && (
             <View>
               <Text style={styles.tabBodyText}>{lesson.description}</Text>
@@ -266,13 +291,15 @@ export default function LeconScreen() {
           )}
         </View>
 
-        {/* ── Leçon suivante ── */}
         <View style={styles.nextArea}>
           <TouchableOpacity
-            style={styles.nextBtn}
-            onPress={() => Alert.alert('Prochaine leçon', 'Complète le défi avant de passer à la suite.')}
+            style={[styles.nextBtn, completing && { opacity: 0.6 }]}
+            onPress={handleCompleteAndNext}
+            disabled={completing}
           >
-            <Text style={styles.nextBtnTxt}>Leçon suivante →</Text>
+            <Text style={styles.nextBtnTxt}>
+              {completing ? 'Enregistrement...' : isCompleted ? 'Leçon suivante →' : 'Terminer et continuer →'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -287,145 +314,54 @@ const styles = StyleSheet.create({
   errorContainer: { flex: 1, backgroundColor: Colors.background.primary, alignItems: 'center', justifyContent: 'center' },
   errorTxt: { ...Typography.h4, color: Colors.text.muted },
   errorBack: { ...Typography.body, color: Colors.brand.gold, marginTop: Spacing.base },
-
-  // Nav
-  navBar: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingTop: 56, paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1, borderBottomColor: Colors.border.subtle,
-  },
+  navBar: { flexDirection: 'row', alignItems: 'center', paddingTop: 56, paddingHorizontal: Spacing.xl, paddingBottom: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
   backBtn: { width: 40, padding: Spacing.xs },
   backArrow: { fontSize: 22, color: Colors.brand.gold },
   navTitle: { flex: 1, ...Typography.label, color: Colors.text.secondary, textAlign: 'center' },
-
-  // Player
-  playerCard: {
-    backgroundColor: Colors.background.secondary,
-    margin: Spacing.xl,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    borderColor: Colors.border.default,
-    padding: Spacing.xl,
-    alignItems: 'center',
-    ...Shadow.md,
-  },
-  playerVisual: {
-    width: 80, height: 80, borderRadius: 40,
-    borderWidth: 2,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: Colors.background.primary,
-    marginBottom: Spacing.lg,
-  },
+  playerCard: { backgroundColor: Colors.background.secondary, margin: Spacing.xl, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border.default, padding: Spacing.xl, alignItems: 'center', ...Shadow.md },
+  playerVisual: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background.primary, marginBottom: Spacing.lg },
   playerPillarNum: { ...Typography.h2 },
   playerPillarName: { ...Typography.caption, color: Colors.text.muted },
   playerLabel: { ...Typography.labelSmall, color: Colors.text.muted, letterSpacing: 3, marginBottom: Spacing.xs },
   playerTitle: { ...Typography.h4, color: Colors.text.primary, textAlign: 'center', marginBottom: Spacing.xs },
-  playerMeta: { ...Typography.caption, color: Colors.text.muted, marginBottom: Spacing.xl },
-
-  // Scrubber
+  playerMeta: { ...Typography.caption, color: Colors.text.muted, marginBottom: Spacing.md },
+  completedBadge: { backgroundColor: Colors.status.successBg, borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: 4, marginBottom: Spacing.lg },
+  completedBadgeTxt: { ...Typography.caption, color: Colors.status.success, fontWeight: '700' },
   scrubberArea: { width: '100%', marginBottom: Spacing.xl },
-  scrubberTrack: {
-    height: 4, backgroundColor: Colors.border.default,
-    borderRadius: 2, overflow: 'visible',
-    position: 'relative',
-  },
+  scrubberTrack: { height: 4, backgroundColor: Colors.border.default, borderRadius: 2, overflow: 'visible', position: 'relative' },
   scrubberFill: { height: 4, borderRadius: 2, position: 'absolute', top: 0, left: 0 },
-  scrubberKnob: {
-    width: 14, height: 14, borderRadius: 7,
-    position: 'absolute', top: -5,
-  },
+  scrubberKnob: { width: 14, height: 14, borderRadius: 7, position: 'absolute', top: -5 },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: Spacing.sm },
   timeText: { ...Typography.caption, color: Colors.text.muted },
-
-  // Contrôles
   controls: { flexDirection: 'row', alignItems: 'center', gap: Spacing['2xl'] },
   controlBtn: { padding: Spacing.sm },
   controlTxt: { ...Typography.body, color: Colors.text.secondary, fontWeight: '600' },
-  playBtn: {
-    width: 64, height: 64, borderRadius: 32,
-    alignItems: 'center', justifyContent: 'center',
-    ...Shadow.gold,
-  },
+  playBtn: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', ...Shadow.gold },
   playBtnTxt: { fontSize: 22, color: Colors.text.inverse },
-
-  // Tabs
-  tabs: {
-    flexDirection: 'row',
-    marginHorizontal: Spacing.xl,
-    borderRadius: Radius.lg,
-    backgroundColor: Colors.background.secondary,
-    padding: 4,
-    marginBottom: Spacing.xl,
-  },
+  tabs: { flexDirection: 'row', marginHorizontal: Spacing.xl, borderRadius: Radius.lg, backgroundColor: Colors.background.secondary, padding: 4, marginBottom: Spacing.xl },
   tab: { flex: 1, paddingVertical: Spacing.sm, alignItems: 'center', borderRadius: Radius.md },
   tabActive: { backgroundColor: Colors.background.primary },
   tabTxt: { ...Typography.label, color: Colors.text.muted },
   tabTxtActive: { color: Colors.text.primary },
-
-  // Tab content
   tabContent: { paddingHorizontal: Spacing.xl },
   tabBodyText: { ...Typography.bodyLarge, color: Colors.text.secondary, lineHeight: 28, marginBottom: Spacing.xl },
-
-  // Insight
-  insightCard: {
-    borderLeftWidth: 2, borderLeftColor: Colors.brand.gold,
-    paddingLeft: Spacing.md, paddingVertical: Spacing.sm,
-    backgroundColor: Colors.background.secondary,
-    borderRadius: Radius.md,
-    padding: Spacing.base,
-  },
+  insightCard: { borderLeftWidth: 2, borderLeftColor: Colors.brand.gold, paddingLeft: Spacing.md, paddingVertical: Spacing.sm, backgroundColor: Colors.background.secondary, borderRadius: Radius.md, padding: Spacing.base },
   insightLabel: { ...Typography.labelSmall, color: Colors.brand.gold, marginBottom: Spacing.sm },
   insightText: { ...Typography.quote, color: Colors.text.primary },
-
-  // Défi
-  defiCard: {
-    borderWidth: 1.5, borderRadius: Radius.lg,
-    padding: Spacing.base, marginBottom: Spacing.xl,
-    backgroundColor: Colors.background.secondary,
-  },
+  defiCard: { borderWidth: 1.5, borderRadius: Radius.lg, padding: Spacing.base, marginBottom: Spacing.xl, backgroundColor: Colors.background.secondary },
   defiLabel: { ...Typography.label, marginBottom: Spacing.sm },
   defiText: { ...Typography.bodyLarge, color: Colors.text.primary, lineHeight: 28 },
-  defiBtn: {
-    borderRadius: Radius.lg, paddingVertical: Spacing.base,
-    alignItems: 'center', marginBottom: Spacing.base,
-  },
+  defiBtn: { borderRadius: Radius.lg, paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.base },
   defiBtnTxt: { ...Typography.button, color: Colors.text.inverse },
-  defiDone: {
-    borderRadius: Radius.lg, paddingVertical: Spacing.md,
-    alignItems: 'center', backgroundColor: Colors.status.successBg,
-    marginBottom: Spacing.base,
-  },
+  defiDone: { borderRadius: Radius.lg, paddingVertical: Spacing.md, alignItems: 'center', backgroundColor: Colors.status.successBg, marginBottom: Spacing.base },
   defiDoneTxt: { ...Typography.body, color: Colors.status.success, fontWeight: '600' },
-  journalBtn: {
-    borderWidth: 1, borderColor: Colors.border.default,
-    borderRadius: Radius.lg, paddingVertical: Spacing.md,
-    alignItems: 'center',
-  },
+  journalBtn: { borderWidth: 1, borderColor: Colors.border.default, borderRadius: Radius.lg, paddingVertical: Spacing.md, alignItems: 'center' },
   journalBtnTxt: { ...Typography.body, color: Colors.text.secondary },
-
-  // Notes
-  noteArea: {
-    backgroundColor: Colors.background.secondary,
-    borderRadius: Radius.lg, borderWidth: 1,
-    borderColor: Colors.border.default,
-    padding: Spacing.base, minHeight: 150,
-    marginBottom: Spacing.base,
-  },
+  noteArea: { backgroundColor: Colors.background.secondary, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border.default, padding: Spacing.base, minHeight: 150, marginBottom: Spacing.base },
   notePlaceholder: { ...Typography.body, color: Colors.text.muted, fontStyle: 'italic', lineHeight: 26 },
-  noteBtn: {
-    borderWidth: 1, borderColor: Colors.border.default,
-    borderRadius: Radius.lg, paddingVertical: Spacing.md,
-    alignItems: 'center',
-  },
+  noteBtn: { borderWidth: 1, borderColor: Colors.border.default, borderRadius: Radius.lg, paddingVertical: Spacing.md, alignItems: 'center' },
   noteBtnTxt: { ...Typography.body, color: Colors.text.secondary },
-
-  // Suivant
   nextArea: { paddingHorizontal: Spacing.xl, marginTop: Spacing.xl },
-  nextBtn: {
-    borderWidth: 1.5, borderColor: Colors.brand.gold,
-    borderRadius: Radius.lg, paddingVertical: Spacing.md,
-    alignItems: 'center',
-  },
+  nextBtn: { borderWidth: 1.5, borderColor: Colors.brand.gold, borderRadius: Radius.lg, paddingVertical: Spacing.md, alignItems: 'center' },
   nextBtnTxt: { ...Typography.button, color: Colors.brand.gold },
 });
