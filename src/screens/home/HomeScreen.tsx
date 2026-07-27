@@ -10,11 +10,13 @@ import { useAuthStore } from '../../store/authStore';
 import { updateStreak, logDailyActivity, getWeekActivity } from '../../services/supabase';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { getPillarById } from '../../constants/pillars';
+import { getCompletedLessonIds, getCurrentActiveLesson, getDailyQuote, getOverallProgress, getNextUnlockDate, getLastCompletedLesson } from '../../constants/progression';
 
 const DAY_LABELS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
 export default function HomeScreen() {
-  const { user, streak, aiQuota, isLoading, refreshStreak } = useAuthStore();
+  const { user, streak, aiQuota, isLoading, refreshStreak, userProgress } = useAuthStore();
   const [updating, setUpdating] = useState(false);
   const [weekActivityDates, setWeekActivityDates] = useState<string[]>([]);
 
@@ -45,6 +47,17 @@ export default function HomeScreen() {
   const messagesUsed = aiQuota?.messages_used ?? 0;
   const messagesRemaining = Math.max(0, 10 - messagesUsed);
   const isPremium = aiQuota?.is_premium ?? false;
+  const completedIds = getCompletedLessonIds(userProgress);
+  const currentLesson = getCurrentActiveLesson(completedIds, userProgress);
+  const currentPillar = currentLesson ? getPillarById(currentLesson.pillarId) : null;
+  const { completedWeeks, totalWeeks } = getOverallProgress(completedIds);
+  const dailyQuote = getDailyQuote();
+  const nextUnlock = !currentLesson ? getNextUnlockDate(completedIds, userProgress) : undefined;
+  const lastCompleted = !currentLesson ? getLastCompletedLesson(completedIds, userProgress) : undefined;
+
+  const daysUntilUnlock = nextUnlock
+  ? Math.max(0, Math.ceil((nextUnlock.unlockDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+  : 0;
 
   // Générer les 7 jours de la semaine (lundi → dimanche) selon l'activité réelle
   const weekDays = Array.from({ length: 7 }, (_, i) => {
@@ -118,22 +131,38 @@ export default function HomeScreen() {
 
           {/* Contenu du jour */}
           <Text style={styles.sectionTitle}>Contenu du jour</Text>
-          <Card style={styles.contentCard} onPress={() => router.push('/(tabs)/programme')}>
-            <Badge label="PILIER 2 · DISCIPLINE" variant="active" style={styles.contentBadge} />
-            <Text style={styles.contentWeek}>Semaine 5</Text>
-            <Text style={styles.contentTitle}>L'engagement comme identité</Text>
-            <View style={styles.progressRow}>
-              <Text style={styles.progressLabel}>Leçon 3/4</Text>
-              <Text style={styles.progressPct}>65%</Text>
-            </View>
-            <ProgressBar progress={0.65} style={styles.progressBar} />
-            <TouchableOpacity
-              style={styles.continueBtn}
-              onPress={() => router.push('/(tabs)/programme')}
-            >
-              <Text style={styles.continueBtnText}>Continuer →</Text>
-            </TouchableOpacity>
-          </Card>
+        {currentLesson && currentPillar ? (
+        <Card style={styles.contentCard} onPress={() => router.push('/(tabs)/programme')}>
+        <Badge
+          label={`PILIER ${currentPillar.id} · ${currentPillar.name.toUpperCase()}`}
+          variant="active"
+          style={styles.contentBadge}
+        />
+        <Text style={styles.contentWeek}>Semaine {currentLesson.weekNumber}</Text>
+        <Text style={styles.contentTitle}>{currentLesson.title}</Text>
+        <TouchableOpacity
+        style={styles.continueBtn}
+        onPress={() => router.push({ pathname: '/lecon', params: { lessonId: currentLesson.id } })}
+        >
+        <Text style={styles.continueBtnText}>Continuer →</Text>
+        </TouchableOpacity>
+        </Card>
+        ) : nextUnlock ? (
+        <Card style={styles.contentCard}>
+        <Text style={styles.contentWeek}>
+        {lastCompleted ? `Dernière leçon : ${lastCompleted.title}` : 'Bien joué !'}
+        </Text>
+        <Text style={styles.contentTitle}>
+        Prochaine leçon disponible dans {daysUntilUnlock} jour{daysUntilUnlock > 1 ? 's' : ''}
+        </Text>
+        <Text style={styles.contentWeek}>{nextUnlock.lesson.title}</Text>
+        </Card>
+        ) : (
+  <Card style={styles.contentCard} onPress={() => router.push('/(tabs)/programme')}>
+    <Text style={styles.contentTitle}>Aucune leçon active pour le moment</Text>
+    <Text style={styles.contentWeek}>Reviens bientôt, ou consulte ton programme.</Text>
+  </Card>
+)}
 
           {/* Raccourcis */}
           <View style={styles.shortcuts}>
@@ -148,10 +177,10 @@ export default function HomeScreen() {
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.shortcutCard}>
-              <Text style={styles.shortcutIcon}>📝</Text>
-              <Text style={styles.shortcutTitle}>Mon journal</Text>
-              <Text style={styles.shortcutSub}>Écrire</Text>
+            <TouchableOpacity style={styles.shortcutCard} onPress={() => router.push('/journal')}>
+            <Text style={styles.shortcutIcon}>📝</Text>
+            <Text style={styles.shortcutTitle}>Mon journal</Text>
+            <Text style={styles.shortcutSub}>Écrire</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -166,20 +195,18 @@ export default function HomeScreen() {
 
           {/* Progression globale */}
           <Card style={styles.progressCard}>
-            <View style={styles.progressGlobalRow}>
-              <Text style={styles.progressGlobalTitle}>Progression programme</Text>
-              <Text style={styles.progressGlobalPct}>Semaine 5/52</Text>
-            </View>
-            <ProgressBar progress={5 / 52} height={6} style={{ marginTop: Spacing.sm }} />
+          <View style={styles.progressGlobalRow}>
+          <Text style={styles.progressGlobalTitle}>Progression programme</Text>
+          <Text style={styles.progressGlobalPct}>Semaine {completedWeeks}/{totalWeeks}</Text>
+          </View>
+          <ProgressBar progress={completedWeeks / totalWeeks} height={6} style={{ marginTop: Spacing.sm }} />
           </Card>
 
           {/* Citation */}
           <Card style={styles.quoteCard} variant="bordered">
-            <Text style={styles.quoteLabel}>CITATION DU CODE</Text>
-            <Text style={styles.quoteText}>
-              "La discipline est la liberté que tu te donnes à toi-même."
-            </Text>
-            <Text style={styles.quoteSource}>— Le Code Masculin, Pilier 2</Text>
+          <Text style={styles.quoteLabel}>CITATION DU CODE</Text>
+          <Text style={styles.quoteText}>"{dailyQuote.text}"</Text>
+          <Text style={styles.quoteSource}>— {dailyQuote.source}</Text>
           </Card>
 
           <View style={{ height: Spacing['3xl'] }} />
@@ -188,6 +215,8 @@ export default function HomeScreen() {
     </View>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background.primary },

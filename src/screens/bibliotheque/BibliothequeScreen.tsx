@@ -4,6 +4,7 @@ import {
   TouchableOpacity, TextInput, Alert, Dimensions,
   Modal, SafeAreaView, ActivityIndicator,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { WebView } from 'react-native-webview';
 
@@ -13,6 +14,8 @@ import {
   type Resource, type ResourceType,
 } from '../../constants/resources';
 import { getPillarById } from '../../constants/pillars';
+import { useAuthStore } from '../../store/authStore';
+import { getCompletedLessonIds, isPdfUnlockedByWeek, isAudioUnlockedByPillar } from '../../constants/progression';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIG
@@ -20,7 +23,6 @@ import { getPillarById } from '../../constants/pillars';
 
 const API_URL = 'https://pilierconscient.com/wp-json/pc-bib/v1/resources';
 const { width } = Dimensions.get('window');
-const IS_PREMIUM = false; // TODO: connecter au store d'abonnement
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -29,6 +31,7 @@ const IS_PREMIUM = false; // TODO: connecter au store d'abonnement
 
 interface ResourceWithUrl extends Resource {
   url?: string;
+  weekNumber?: number;
 }
 
 // Forme brute retournée par wp-json/pc-bib/v1/resources
@@ -110,6 +113,7 @@ function mapApiToResources(api: ApiResponse): ResourceWithUrl[] {
       type:         'pdf' as ResourceType,
       access:       'premium' as const,
       pillarId:     p.pilier ?? undefined,
+      weekNumber:   p.module,
       url:          p.url ?? '',
       isDownloaded: false,
     }));
@@ -188,7 +192,6 @@ function SoundCloudPlayer({ url, accentColor }: { url: string; accentColor: stri
         javaScriptEnabled
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
-        // Bloquer toute navigation externe (liens SoundCloud, etc.)
         onShouldStartLoadWithRequest={request => {
           const allowed = request.url.includes('w.soundcloud.com') || request.url.includes('api.soundcloud.com');
           return allowed;
@@ -265,7 +268,6 @@ function AudioPlayerModal({ visible, resource, onClose }: AudioPlayerModalProps)
         </TouchableOpacity>
 
         <View style={playerStyles.content}>
-          {/* Artwork */}
           <View style={[playerStyles.artwork, { backgroundColor: accentColor + '22' }]}>
             <Text style={[playerStyles.artworkNum, { color: accentColor }]}>
               {resource.pillarId ? `P${resource.pillarId}` : '🎧'}
@@ -280,10 +282,8 @@ function AudioPlayerModal({ visible, resource, onClose }: AudioPlayerModalProps)
               Lien audio non disponible.
             </Text>
           ) : useSoundCloud ? (
-            // SoundCloud → widget embarqué dans WebView
             <SoundCloudPlayer url={url} accentColor={accentColor} />
           ) : (
-            // Fichier audio direct → expo-audio
             <DirectAudioPlayer url={url} accentColor={accentColor} />
           )}
         </View>
@@ -314,7 +314,6 @@ const playerStyles = StyleSheet.create({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VISIONNEUSE PDF MODAL
-// Nouveau composant — n'interfère pas avec le reste
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface PdfViewerModalProps {
@@ -328,13 +327,10 @@ function PdfViewerModal({ visible, url, title, onClose }: PdfViewerModalProps) {
   const [webLoading, setWebLoading] = useState(true);
   const [errored, setErrored]       = useState(false);
 
-  // Réinitialiser à chaque ouverture
   useEffect(() => {
     if (visible) { setWebLoading(true); setErrored(false); }
   }, [visible, url]);
 
-  // Google Docs Viewer en premier — seule méthode fiable sur Android WebView
-  // Android télécharge les PDFs directs au lieu de les afficher
   const viewerUrl = `https://docs.google.com/viewer?embedded=true&url=${encodeURIComponent(url)}`;
 
   return (
@@ -381,9 +377,7 @@ function PdfViewerModal({ visible, url, title, onClose }: PdfViewerModalProps) {
                 }}
                 javaScriptEnabled
                 domStorageEnabled
-                // Empêcher le téléchargement — forcer l'affichage dans la WebView
                 onShouldStartLoadWithRequest={request => {
-                  // Bloquer les tentatives de téléchargement direct
                   if (request.url.startsWith('blob:') || request.url.startsWith('content:')) return false;
                   return true;
                 }}
@@ -400,7 +394,6 @@ function PdfViewerModal({ visible, url, title, onClose }: PdfViewerModalProps) {
   );
 }
 
-
 const pdfStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#1a1a2e' },
   header:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: Spacing.xl, borderBottomWidth: 1, borderBottomColor: '#333' },
@@ -412,46 +405,45 @@ const pdfStyles = StyleSheet.create({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RESOURCE CARD
-// Code original préservé intégralement.
-// Seul ajout : props onPlay + onOpenPdf pour déléguer l'action au parent.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ResourceCardProps {
   resource: ResourceWithUrl;
+  unlocked: boolean;
   onPlay: (r: ResourceWithUrl) => void;
   onOpenPdf: (r: ResourceWithUrl) => void;
 }
 
-function ResourceCard({ resource, onPlay, onOpenPdf }: ResourceCardProps) {
+function ResourceCard({ resource, unlocked, onPlay, onOpenPdf }: ResourceCardProps) {
   const [downloaded, setDownloaded] = useState(resource.isDownloaded ?? false);
   const [downloading, setDownloading] = useState(false);
 
   const pillar = resource.pillarId ? getPillarById(resource.pillarId) : null;
-  const isLocked = resource.access === 'premium' && !IS_PREMIUM;
+  const isLocked = resource.access === 'premium' && !unlocked;
   const icon = getTypeIcon(resource.type);
   const typeLabel = getTypeLabel(resource.type);
   const accentColor = pillar?.color ?? Colors.brand.gold;
 
-  // ── Action principale ──────────────────────────────────────────
-  // Logique originale préservée.
-  // Ajout : si l'URL est réelle, on délègue au lecteur natif.
   const handleAction = () => {
     if (isLocked) {
+      const message = (resource.type === 'pdf' || resource.type === 'audio')
+        ? "Cette ressource se débloque quand tu complètes la leçon ou le pilier correspondant."
+        : "Passe à l'abonnement Premium pour accéder à cette ressource.";
+
       Alert.alert(
-        '👑 Contenu Premium',
-        'Passe à l\'abonnement Premium pour accéder à cette ressource.',
+        '🔒 Contenu verrouillé',
+        message,
         [
           { text: 'Annuler', style: 'cancel' },
           {
-            text: 'Voir les plans', style: 'default',
-            onPress: () => Alert.alert('Premium', 'Fonctionnalité paiement bientôt disponible.'),
+            text: 'Voir le programme', style: 'default',
+            onPress: () => router.push('/(tabs)/programme'),
           },
         ],
       );
       return;
     }
 
-    // URL disponible → lecteur natif (audio) ou visionneuse (pdf/ebook/template)
     if (resource.url && resource.url.length > 0) {
       if (resource.type === 'audio') {
         onPlay(resource);
@@ -463,7 +455,6 @@ function ResourceCard({ resource, onPlay, onOpenPdf }: ResourceCardProps) {
       }
     }
 
-    // Pas d'URL → comportement simulé original
     if (downloaded) {
       Alert.alert('Ouvrir', `Ouverture de "${resource.title}"...`);
       return;
@@ -476,7 +467,6 @@ function ResourceCard({ resource, onPlay, onOpenPdf }: ResourceCardProps) {
     }, 1500);
   };
 
-  // ── Render original (inchangé) ─────────────────────────────────
   return (
     <View style={[styles.card, isLocked && styles.cardLocked]}>
       {isLocked && (
@@ -538,7 +528,7 @@ function ResourceCard({ resource, onPlay, onOpenPdf }: ResourceCardProps) {
           downloaded && !isLocked && styles.cardCtaTxtDownloaded,
         ]}>
           {isLocked
-            ? '🔒 Débloquer avec Premium'
+            ? '🔒 Verrouillé'
             : (resource.url && resource.url.length > 0)
               ? resource.type === 'audio'
                 ? '▶ Écouter'
@@ -558,8 +548,6 @@ function ResourceCard({ resource, onPlay, onOpenPdf }: ResourceCardProps) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ÉCRAN PRINCIPAL
-// Structure originale préservée intégralement.
-// Ajouts : fetch API, état player audio, état PDF viewer.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function BibliothequeScreen() {
@@ -567,7 +555,10 @@ export default function BibliothequeScreen() {
   const [searchQuery, setSearchQuery]   = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
 
-  // ── AJOUT : données dynamiques depuis l'API ────────────────────
+  const { entitlement, userProgress } = useAuthStore();
+  const isPremium = entitlement.active;
+  const completedIds = getCompletedLessonIds(userProgress);
+
   const [apiResources, setApiResources] = useState<ResourceWithUrl[]>([]);
   const [apiLoading, setApiLoading]     = useState(true);
 
@@ -576,18 +567,15 @@ export default function BibliothequeScreen() {
       .then(r => r.json())
       .then((data: ApiResponse) => setApiResources(mapApiToResources(data)))
       .catch(() => {
-        // Fallback : ressources statiques si l'API est inaccessible
         setApiResources(RESOURCES as ResourceWithUrl[]);
       })
       .finally(() => setApiLoading(false));
   }, []);
 
-  // Afficher statiques pendant le chargement, données API ensuite
   const allResources: ResourceWithUrl[] = apiLoading
     ? (RESOURCES as ResourceWithUrl[])
     : apiResources;
 
-  // ── AJOUT : état lecteur audio ─────────────────────────────────
   const [playerVisible, setPlayerVisible]   = useState(false);
   const [currentAudio, setCurrentAudio]     = useState<ResourceWithUrl | null>(null);
 
@@ -595,7 +583,6 @@ export default function BibliothequeScreen() {
     if (!resource.url) return;
     setCurrentAudio(resource);
     setPlayerVisible(true);
-    // Le chargement/lecture est géré dans AudioPlayerModal via useEffect
   }, []);
 
   const handleClosePlayer = useCallback(() => {
@@ -603,7 +590,6 @@ export default function BibliothequeScreen() {
     setCurrentAudio(null);
   }, []);
 
-  // ── AJOUT : état visionneuse PDF ───────────────────────────────
   const [pdfVisible, setPdfVisible]   = useState(false);
   const [pdfUrl, setPdfUrl]           = useState('');
   const [pdfTitle, setPdfTitle]       = useState('');
@@ -615,7 +601,24 @@ export default function BibliothequeScreen() {
     setPdfVisible(true);
   }, []);
 
-  // ── Filtres (logique originale, sur allResources) ──────────────
+  const isResourceUnlocked = (r: ResourceWithUrl): boolean => {
+    if (!isPremium) return false;
+
+    if (r.type === 'template' || r.type === 'ebook') return true;
+
+    if (r.type === 'pdf') {
+      if (r.weekNumber === undefined) return false;
+      return isPdfUnlockedByWeek(r.weekNumber, completedIds);
+    }
+
+    if (r.type === 'audio') {
+      if (r.pillarId === undefined) return false;
+      return isAudioUnlockedByPillar(r.pillarId, completedIds);
+    }
+
+    return false;
+  };
+
   const filteredResources = allResources.filter(r => {
     const matchType   = activeFilter === 'all' || r.type === activeFilter;
     const matchSearch = searchQuery === '' ||
@@ -628,11 +631,9 @@ export default function BibliothequeScreen() {
   const premiumResources = filteredResources.filter(r => r.access === 'premium');
   const downloadedCount  = allResources.filter(r => r.isDownloaded).length;
 
-  // ── Render (original intégralement préservé) ───────────────────
   return (
     <View style={styles.container}>
 
-      {/* ── Header (original) ── */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Bibliothèque</Text>
         {downloadedCount > 0 && (
@@ -642,7 +643,6 @@ export default function BibliothequeScreen() {
         )}
       </View>
 
-      {/* ── Barre de recherche (originale) ── */}
       <View style={styles.searchArea}>
         <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
           <Text style={styles.searchIcon}>🔍</Text>
@@ -663,7 +663,6 @@ export default function BibliothequeScreen() {
         </View>
       </View>
 
-      {/* ── Filtres (originaux) ── */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -683,13 +682,12 @@ export default function BibliothequeScreen() {
         ))}
       </ScrollView>
 
-      {/* ── Liste (originale) ── */}
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
 
-        {!IS_PREMIUM && (
+        {!isPremium && (
           <TouchableOpacity
             style={styles.premiumBanner}
-            onPress={() => Alert.alert('Premium', 'Fonctionnalité paiement bientôt disponible.')}
+            onPress={() => router.push('/(tabs)/profil')}
             activeOpacity={0.9}
           >
             <Text style={styles.premiumBannerIcon}>👑</Text>
@@ -706,21 +704,20 @@ export default function BibliothequeScreen() {
         {freeResources.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
-              {IS_PREMIUM ? 'Toutes les ressources' : 'Ressources gratuites'}
+              {isPremium ? 'Toutes les ressources' : 'Ressources gratuites'}
               <Text style={styles.sectionCount}> · {freeResources.length}</Text>
             </Text>
             <View style={styles.grid}>
               {freeResources.map(r => (
                 <View key={r.id} style={styles.gridItem}>
-                  {/* onPlay et onOpenPdf = seule modification sur ResourceCard */}
-                  <ResourceCard resource={r} onPlay={handlePlay} onOpenPdf={handleOpenPdf} />
+                  <ResourceCard resource={r} unlocked={isResourceUnlocked(r)} onPlay={handlePlay} onOpenPdf={handleOpenPdf} />
                 </View>
               ))}
             </View>
           </View>
         )}
 
-        {!IS_PREMIUM && premiumResources.length > 0 && (
+        {premiumResources.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>
@@ -732,7 +729,7 @@ export default function BibliothequeScreen() {
             <View style={styles.grid}>
               {premiumResources.map(r => (
                 <View key={r.id} style={styles.gridItem}>
-                  <ResourceCard resource={r} onPlay={handlePlay} onOpenPdf={handleOpenPdf} />
+                  <ResourceCard resource={r} unlocked={isResourceUnlocked(r)} onPlay={handlePlay} onOpenPdf={handleOpenPdf} />
                 </View>
               ))}
             </View>
@@ -752,7 +749,6 @@ export default function BibliothequeScreen() {
         <View style={{ height: 80 }} />
       </ScrollView>
 
-      {/* ── AJOUT : Modals (hors du ScrollView, invisibles par défaut) ── */}
       <AudioPlayerModal
         visible={playerVisible}
         resource={currentAudio}
@@ -769,7 +765,7 @@ export default function BibliothequeScreen() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STYLES — copie exacte de l'original, aucune modification
+// STYLES
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CARD_WIDTH = (width - Spacing.xl * 2 - Spacing.sm) / 2;

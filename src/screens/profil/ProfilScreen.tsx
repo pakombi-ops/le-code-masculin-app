@@ -7,6 +7,7 @@ import { router } from 'expo-router';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { ProgressBar } from '../../components/ui';
 import { useAuthStore } from '../../store/authStore';
+import { getCompletedLessonIds, getOverallProgress } from '../../constants/progression';
 
 function StatCard({ value, label }: { value: string | number; label: string }) {
   return (
@@ -39,7 +40,7 @@ function SettingRow({ icon, label, value, onPress, isToggle, toggleValue, onTogg
 }
 
 export default function ProfilScreen() {
-  const { user, streak, aiQuota, logout, linkPurchaseAccount } = useAuthStore();
+  const { user, streak, aiQuota, logout, linkPurchaseAccount, userProgress } = useAuthStore();
   const [darkMode, setDarkMode] = useState(true);
   const [notifSession, setNotifSession] = useState(true);
   const [notifStreak, setNotifStreak] = useState(true);
@@ -56,6 +57,9 @@ export default function ProfilScreen() {
   const longestStreak = streak?.longest_streak ?? 0;
   const isPremium = aiQuota?.is_premium ?? false;
   const messagesUsed = aiQuota?.messages_used ?? 0;
+  const completedIds = getCompletedLessonIds(userProgress);
+  const { completedWeeks, totalWeeks } = getOverallProgress(completedIds);
+  const progressPercent = totalWeeks > 0 ? Math.round((completedWeeks / totalWeeks) * 100) : 0;
 
   const memberSince = user?.created_at
     ? new Date(user.created_at).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
@@ -126,11 +130,11 @@ export default function ProfilScreen() {
         {/* Progression */}
         <View style={styles.section}>
           <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>Progression programme</Text>
-            <Text style={styles.progressPct}>Semaine 5/52</Text>
+          <Text style={styles.progressLabel}>Progression programme</Text>
+          <Text style={styles.progressPct}>Semaine {completedWeeks}/{totalWeeks}</Text>
           </View>
-          <ProgressBar progress={5 / 52} height={6} />
-          <Text style={styles.progressSub}>10% accompli · Continue !</Text>
+          <ProgressBar progress={completedWeeks / totalWeeks} height={6} />
+          <Text style={styles.progressSub}>{progressPercent}% accompli · Continue !</Text>
         </View>
 
         {/* Abonnement */}
@@ -142,7 +146,7 @@ export default function ProfilScreen() {
               <View>
                 <Text style={styles.subscriptionTier}>{isPremium ? 'Plan Premium' : 'Plan Gratuit'}</Text>
                 <Text style={styles.subscriptionPrice}>
-                  {isPremium ? '14,90 €/mois' : `${10 - messagesUsed} messages IA restants`}
+                  {isPremium ? '24,75 €/mois' : `${10 - messagesUsed} messages IA restants`}
                 </Text>
               </View>
             </View>

@@ -235,6 +235,7 @@ export const saveJournalEntry = async (entry: {
   title: string;
   content: string;
 }) => {
+  const today = new Date().toISOString().split('T')[0];
   const { data, error } = await supabase
     .from('journal_entries')
     .insert({
@@ -242,8 +243,38 @@ export const saveJournalEntry = async (entry: {
       pillar_id: entry.pillarId,
       title: entry.title,
       content: entry.content,
+      date: today,
     })
     .select()
     .single();
   return { data, error };
+};
+export const getJournalEntries = async (userId: string, limit = 50) => {
+  const { data, error } = await supabase
+    .from('journal_entries')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return { data, error };
+};
+export const updateJournalEntry = async (
+  entryId: string,
+  updates: { title: string; content: string }
+) => {
+  const { data, error } = await supabase
+    .from('journal_entries')
+    .update(updates)
+    .eq('id', entryId)
+    .select()
+    .single();
+  return { data, error };
+};
+
+export const deleteJournalEntry = async (entryId: string) => {
+  const { error } = await supabase
+    .from('journal_entries')
+    .delete()
+    .eq('id', entryId);
+  return { error };
 };
