@@ -4,8 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Colors } from '../src/theme';
-import { supabase, getSession } from '../src/services/supabase';
+import { supabase, getSession, savePacteEntry, saveDiagnosticResults } from '../src/services/supabase';
 import { useAuthStore } from '../src/store/authStore';
+import { useOnboardingStore } from '../src/store/onboardingStore';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -16,44 +17,52 @@ export default function RootLayout() {
   const segments = useSegments();
 
   const checkSession = async () => {
-  try {
-    const result = await getSession();
-    const hasSession = !!result.session;
-    setIsAuthenticated(hasSession);
+    try {
+      const result = await getSession();
+      const hasSession = !!result.session;
+      setIsAuthenticated(hasSession);
 
-    if (hasSession && result.session?.user) {
-      useAuthStore.getState().setUser({
-        id: result.session.user.id,
-        email: result.session.user.email ?? '',
-        prenom: result.session.user.user_metadata?.prenom ?? '',
-      });
-      await useAuthStore.getState().loadUser(result.session.user.id);
-    } else {
+      if (hasSession && result.session?.user) {
+        useAuthStore.getState().setUser({
+          id: result.session.user.id,
+          email: result.session.user.email ?? '',
+          prenom: result.session.user.user_metadata?.prenom ?? '',
+        });
+        await useAuthStore.getState().loadUser(result.session.user.id);
+      } else {
+        useAuthStore.getState().setLoading(false);
+      }
+    } catch (err) {
+      console.error('Erreur checkSession:', err);
+      setIsAuthenticated(false);
       useAuthStore.getState().setLoading(false);
+    } finally {
+      setIsReady(true);
     }
-  } catch (err) {
-    console.error('Erreur checkSession:', err);
-    setIsAuthenticated(false);
-    useAuthStore.getState().setLoading(false);
-  } finally {
-    setIsReady(true);
-  }
-};
+  };
 
   useEffect(() => {
     checkSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-  setIsAuthenticated(!!session);
+      setIsAuthenticated(!!session);
 
-  if (session?.user) {
-    useAuthStore.getState().setUser({
-      id: session.user.id,
-      email: session.user.email ?? '',
-      prenom: session.user.user_metadata?.prenom ?? '',
-    });
-    useAuthStore.getState().loadUser(session.user.id);
-  }
+      if (session?.user) {
+        useAuthStore.getState().setUser({
+          id: session.user.id,
+          email: session.user.email ?? '',
+          prenom: session.user.user_metadata?.prenom ?? '',
+        });
+        useAuthStore.getState().loadUser(session.user.id);
+
+        const { pacteText, quizScores, reset } = useOnboardingStore.getState();
+        if (pacteText || quizScores) {
+          Promise.all([
+            savePacteEntry(session.user.id, pacteText),
+            quizScores ? saveDiagnosticResults(session.user.id, quizScores) : Promise.resolve(),
+          ]).then(() => reset());
+        }
+      }
     });
 
     return () => listener?.subscription.unsubscribe();
@@ -67,7 +76,7 @@ export default function RootLayout() {
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (isAuthenticated && inAuthGroup) {
-  router.replace('/(tabs)/accueil');
+      router.replace('/(tabs)/accueil');
     }
   }, [isReady, isAuthenticated, segments]);
 

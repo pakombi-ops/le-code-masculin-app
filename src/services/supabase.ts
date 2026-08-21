@@ -297,3 +297,25 @@ export const updatePassword = async (newPassword: string) => {
   const { data, error } = await supabase.auth.updateUser({ password: newPassword });
   return { data, error };
 };
+
+export const savePacteEntry = async (userId: string, content: string) => {
+  if (!content || content.trim().length === 0) return { error: null };
+  const unlockDate = new Date();
+  unlockDate.setFullYear(unlockDate.getFullYear() + 1);
+
+  const { error } = await supabase
+    .from('pacte_entries')
+    .insert({
+      user_id: userId,
+      content,
+      unlock_date: unlockDate.toISOString().split('T')[0],
+    });
+  return { error };
+};
+
+export const saveDiagnosticResults = async (userId: string, scores: Record<string, number>) => {
+  const { error } = await supabase
+    .from('diagnostic_results')
+    .insert({ user_id: userId, scores });
+  return { error };
+};

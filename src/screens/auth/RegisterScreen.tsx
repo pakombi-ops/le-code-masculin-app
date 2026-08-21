@@ -8,6 +8,7 @@ import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { Button, Input } from '../../components/ui';
 import { signUp } from '../../services/supabase';
 import { useAuthStore } from '../../store/authStore';
+import { useOnboardingStore } from '../../store/onboardingStore';
 
 export default function RegisterScreen() {
   const { scores } = useLocalSearchParams<{ scores: string }>();
@@ -17,6 +18,7 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const { setUser } = useAuthStore();
+  const { pacteText, quizScores, reset } = useOnboardingStore();
 
   const handleRegister = async () => {
     if (!prenom.trim()) { setError('Ajoute ton prénom.'); return; }
@@ -45,6 +47,7 @@ export default function RegisterScreen() {
     });
 
     setIsLoading(false);
+    
     router.replace('/(tabs)/accueil');
   };
 

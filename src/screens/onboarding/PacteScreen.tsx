@@ -9,13 +9,15 @@ import * as Haptics from 'expo-haptics';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { addYears, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { useOnboardingStore } from '../../store/onboardingStore';
 
 export default function PacteScreen() {
   const [text, setText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const buttonOpacity  = useRef(new Animated.Value(0)).current;
   const buttonTranslate = useRef(new Animated.Value(20)).current;
-
+  const setPacteText = useOnboardingStore((s) => s.setPacteText);
+  
   const returnDate = format(addYears(new Date(), 1), "d MMMM yyyy", { locale: fr });
   const wordCount  = text.trim().split(/\s+/).filter(Boolean).length;
 
@@ -35,10 +37,9 @@ export default function PacteScreen() {
   };
 
   const handleSeal = async () => {
-    Keyboard.dismiss();
+     Keyboard.dismiss();
     try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
-    // Stockage simple — sera remplacé par Supabase après connexion
-    // SecureStore retiré pour compatibilité Expo Go
+    setPacteText(text.trim());
     router.push('/(auth)/quiz');
   };
 

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Dimensi
 import { router } from 'expo-router';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../theme';
 import { QUIZ_QUESTIONS, calculateScores } from '../../constants/quiz';
+import { useOnboardingStore } from '../../store/onboardingStore';
 
 const TOTAL = QUIZ_QUESTIONS.length;
 
@@ -13,6 +14,7 @@ export default function QuizScreen() {
   const btnOpacity = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scrollRef = useRef<ScrollView>(null);
+  const setQuizScores = useOnboardingStore((s) => s.setQuizScores);
 
   const q = QUIZ_QUESTIONS[currentIndex];
 
@@ -49,6 +51,7 @@ export default function QuizScreen() {
 
     } else {
       const scores = calculateScores(newAnswers);
+      setQuizScores(scores);
       router.replace({
         pathname: '/(auth)/diagnostic-transition',
         params: { scores: JSON.stringify(scores) },
