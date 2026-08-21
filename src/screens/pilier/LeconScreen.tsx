@@ -11,6 +11,8 @@ import { getPillarById } from '../../constants/pillars';
 import { useAuthStore } from '../../store/authStore';
 import { getNextLesson, getLessonStatus, getCompletedLessonIds } from '../../constants/progression';
 import { fetchLessonVideos, toLoomEmbedUrl, type LessonVideoMap } from '../../services/lessonVideosService';
+import { Modal, TextInput } from 'react-native';
+import { getJournalEntryForLesson, saveLessonJournalEntry } from '../../services/supabase';
 
 const { width } = Dimensions.get('window');
 type Tab = 'resume' | 'defi' | 'notes';
@@ -37,6 +39,13 @@ export default function LeconScreen() {
 
   const progressAnim = useRef(new Animated.Value(0)).current;
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [journalModalVisible, setJournalModalVisible] = useState(false);
+  const [journalTitle, setJournalTitle] = useState('');
+  const [journalContent, setJournalContent] = useState('');
+  const [journalEntryId, setJournalEntryId] = useState<string | null>(null);
+  const [journalSaving, setJournalSaving] = useState(false);
+  const [journalLoaded, setJournalLoaded] = useState(false);
 
   const isCompleted = lesson
     ? userProgress.some((p) => p.lesson_id === lesson.id)
@@ -168,6 +177,45 @@ export default function LeconScreen() {
     const m = Math.floor(s / 60);
     const sec = s % 60;
     return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+  if (user?.id && lesson) {
+    getJournalEntryForLesson(user.id, lesson.id).then(({ data }) => {
+      if (data) {
+        setJournalTitle(data.title ?? '');
+        setJournalContent(data.content ?? '');
+        setJournalEntryId(data.id);
+      }
+      setJournalLoaded(true);
+    });
+  }
+  }, [user?.id, lesson?.id]);
+
+  const handleSaveJournal = async () => {
+  if (!user?.id || !journalContent.trim()) {
+    Alert.alert('Contenu requis', 'Écris quelque chose avant de sauvegarder.');
+    return;
+    }
+    setJournalSaving(true);
+   const { data, error } = await saveLessonJournalEntry({
+    userId: user.id,
+    lessonId: lesson.id,
+    pillarId: lesson.pillarId,
+    title: journalTitle.trim() || lesson.title,
+    content: journalContent.trim(),
+    existingId: journalEntryId ?? undefined,
+    });
+    setJournalSaving(false);
+
+    if (error) {
+      Alert.alert('Erreur', "Impossible d'enregistrer ta note pour le moment.");
+     return;
+    }
+
+    if (data) setJournalEntryId(data.id);
+    setJournalModalVisible(false);
+    Alert.alert('✅ Enregistré', 'Ta note a été sauvegardée.');
   };
 
   return (
@@ -321,9 +369,11 @@ export default function LeconScreen() {
 
               <TouchableOpacity
                 style={styles.journalBtn}
-                onPress={() => Alert.alert('Journal', 'Fonctionnalité journal bientôt disponible.')}
-              >
-                <Text style={styles.journalBtnTxt}>📝 Écrire dans mon journal</Text>
+                onPress={() => setJournalModalVisible(true)}
+                >
+                <Text style={styles.journalBtnTxt}>
+                  {journalEntryId ? '📝 Modifier ma note' : '📝 Écrire dans mon journal'}
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -332,17 +382,19 @@ export default function LeconScreen() {
             <View>
               <View style={styles.noteArea}>
                 <Text style={styles.notePlaceholder}>
-                  {note || 'Tes notes personnelles sur cette leçon...'}
+                  {journalContent || 'Tes notes personnelles sur cette leçon...'}
                 </Text>
               </View>
               <TouchableOpacity
                 style={styles.noteBtn}
-                onPress={() => Alert.alert('Notes', 'Éditeur de notes bientôt disponible.')}
+                onPress={() => setJournalModalVisible(true)}
               >
-                <Text style={styles.noteBtnTxt}>✏️ Écrire une note</Text>
+                <Text style={styles.noteBtnTxt}>
+                  {journalEntryId ? '✏️ Modifier ma note' : '✏️ Écrire une note'}
+                </Text>
               </TouchableOpacity>
             </View>
-          )}
+)}
         </View>
 
         <View style={styles.nextArea}>
@@ -356,7 +408,37 @@ export default function LeconScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-
+<Modal visible={journalModalVisible} transparent animationType="slide" onRequestClose={() => setJournalModalVisible(false)}>
+  <View style={journalModalStyles.overlay}>
+    <View style={journalModalStyles.content}>
+      <Text style={journalModalStyles.title}>
+        {journalEntryId ? 'Modifier ma note' : 'Ma note sur cette leçon'}
+      </Text>
+      <TextInput
+        style={journalModalStyles.input}
+        placeholder="Titre (optionnel)"
+        placeholderTextColor={Colors.text.muted}
+        value={journalTitle}
+        onChangeText={setJournalTitle}
+      />
+      <TextInput
+        style={[journalModalStyles.input, journalModalStyles.textarea]}
+        placeholder="Écris ce que cette leçon t'inspire..."
+        placeholderTextColor={Colors.text.muted}
+        value={journalContent}
+        onChangeText={setJournalContent}
+        multiline
+        textAlignVertical="top"
+      />
+      <TouchableOpacity style={journalModalStyles.saveBtn} onPress={handleSaveJournal} disabled={journalSaving}>
+        <Text style={journalModalStyles.saveBtnTxt}>{journalSaving ? 'Enregistrement...' : 'Enregistrer'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => setJournalModalVisible(false)}>
+        <Text style={journalModalStyles.cancelTxt}>Fermer</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
         <View style={{ height: 50 }} />
       </ScrollView>
     </View>
@@ -422,4 +504,14 @@ const styles = StyleSheet.create({
   nextArea: { paddingHorizontal: Spacing.xl, marginTop: Spacing.xl },
   nextBtn: { borderWidth: 1.5, borderColor: Colors.brand.gold, borderRadius: Radius.lg, paddingVertical: Spacing.md, alignItems: 'center' },
   nextBtnTxt: { ...Typography.button, color: Colors.brand.gold },
+});
+const journalModalStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  content: { backgroundColor: Colors.background.secondary, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl, paddingBottom: Spacing['3xl'] },
+  title: { ...Typography.h3, color: Colors.text.primary, marginBottom: Spacing.lg },
+  input: { backgroundColor: Colors.background.tertiary, borderRadius: Radius.md, padding: Spacing.md, color: Colors.text.primary, marginBottom: Spacing.md },
+  textarea: { minHeight: 140 },
+  saveBtn: { backgroundColor: Colors.brand.gold, borderRadius: Radius.md, paddingVertical: Spacing.md, alignItems: 'center', marginBottom: Spacing.md },
+  saveBtnTxt: { ...Typography.button, color: Colors.text.inverse },
+  cancelTxt: { ...Typography.body, color: Colors.text.muted, textAlign: 'center' },
 });

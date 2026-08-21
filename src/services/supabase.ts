@@ -319,3 +319,48 @@ export const saveDiagnosticResults = async (userId: string, scores: Record<strin
     .insert({ user_id: userId, scores });
   return { error };
 };
+
+export const getJournalEntryForLesson = async (userId: string, lessonId: string) => {
+  const { data, error } = await supabase
+    .from('journal_entries')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('lesson_id', lessonId)
+    .maybeSingle();
+  return { data, error };
+};
+
+export const saveLessonJournalEntry = async (params: {
+  userId: string;
+  lessonId: string;
+  pillarId: number;
+  title: string;
+  content: string;
+  existingId?: string;
+}) => {
+  const today = new Date().toISOString().split('T')[0];
+
+  if (params.existingId) {
+    const { data, error } = await supabase
+      .from('journal_entries')
+      .update({ title: params.title, content: params.content })
+      .eq('id', params.existingId)
+      .select()
+      .single();
+    return { data, error };
+  }
+
+  const { data, error } = await supabase
+    .from('journal_entries')
+    .insert({
+      user_id: params.userId,
+      lesson_id: params.lessonId,
+      pillar_id: params.pillarId,
+      title: params.title,
+      content: params.content,
+      date: today,
+    })
+    .select()
+    .single();
+  return { data, error };
+};
