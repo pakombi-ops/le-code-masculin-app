@@ -91,19 +91,7 @@ export default function LoginScreen() {
           />
         </View>
 
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>ou</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <TouchableOpacity style={styles.oauthBtn}>
-          <Text style={styles.oauthText}> Continuer avec Apple</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.oauthBtn, { marginTop: Spacing.sm }]}>
-          <Text style={styles.oauthText}>G  Continuer avec Google</Text>
-        </TouchableOpacity>
-
+        
         <View style={styles.footer}>
           <Text style={styles.footerText}>Pas encore de compte ?</Text>
           <TouchableOpacity onPress={() => router.push('/(auth)/register')}>

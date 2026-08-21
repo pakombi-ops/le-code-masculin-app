@@ -116,19 +116,7 @@ export default function RegisterScreen() {
           />
         </View>
 
-        <View style={styles.dividerRow}>
-          <View style={styles.divLine} />
-          <Text style={styles.divText}>ou</Text>
-          <View style={styles.divLine} />
-        </View>
-
-        <TouchableOpacity style={styles.oauthBtn}>
-          <Text style={styles.oauthText}> Continuer avec Apple</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.oauthBtn, { marginTop: Spacing.sm }]}>
-          <Text style={styles.oauthText}>G  Continuer avec Google</Text>
-        </TouchableOpacity>
-
+        
         <View style={styles.loginRow}>
           <Text style={styles.loginText}>Déjà un compte ?</Text>
           <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
