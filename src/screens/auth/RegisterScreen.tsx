@@ -29,10 +29,17 @@ export default function RegisterScreen() {
     setIsLoading(true);
 
     const { data, error: authError } = await signUp(email.trim(), password, prenom.trim());
-
+    
     if (authError) {
       setIsLoading(false);
       setError(authError.message);
+      return;
+    }
+
+     // Supabase renvoie un user sans erreur si l'email existe déjà (anti-énumération)
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      setIsLoading(false);
+      setError('Ce compte existe déjà. Connecte-toi ou réinitialise ton mot de passe.');
       return;
     }
 
