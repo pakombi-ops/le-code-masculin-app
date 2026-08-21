@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border.subtle,
     height: 125,
-    paddingTop: 8,
+    paddingTop: 16,
     paddingBotton: 12,
     //marginBottom: 12,
   },

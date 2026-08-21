@@ -278,3 +278,22 @@ export const deleteJournalEntry = async (entryId: string) => {
     .eq('id', entryId);
   return { error };
 };
+
+export const requestPasswordReset = async (email: string) => {
+  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  return { error };
+};
+
+export const verifyPasswordResetOtp = async (email: string, token: string) => {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token,
+    type: 'recovery',
+  });
+  return { data, error };
+};
+
+export const updatePassword = async (newPassword: string) => {
+  const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+  return { data, error };
+};

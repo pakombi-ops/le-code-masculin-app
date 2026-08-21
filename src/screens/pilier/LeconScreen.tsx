@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Animated, Dimensions, Alert,
+  TouchableOpacity, Animated, Dimensions, Alert, ActivityIndicator,
 } from 'react-native';
+import { WebView } from 'react-native-webview';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../theme';
 import { getLessonById, formatDuration } from '../../constants/lessons';
 import { getPillarById } from '../../constants/pillars';
 import { useAuthStore } from '../../store/authStore';
 import { getNextLesson, getLessonStatus, getCompletedLessonIds } from '../../constants/progression';
+import { fetchLessonVideos, toLoomEmbedUrl, type LessonVideoMap } from '../../services/lessonVideosService';
 
 const { width } = Dimensions.get('window');
 type Tab = 'resume' | 'defi' | 'notes';
@@ -19,9 +21,15 @@ export default function LeconScreen() {
   const pillar = lesson ? getPillarById(lesson.pillarId) : null;
   const { user, userProgress, completeLessonAndRefresh } = useAuthStore();
 
+  // Player audio simulé (conservé pour les leçons de type 'audio')
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+
+  // Vidéo Loom
+  const [videoUrls, setVideoUrls] = useState<LessonVideoMap>({});
+  const [loadingVideo, setLoadingVideo] = useState(true);
+
   const [activeTab, setActiveTab] = useState<Tab>('resume');
   const [defiDone, setDefiDone] = useState(false);
   const [note, setNote] = useState('');
@@ -40,6 +48,20 @@ export default function LeconScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+    setLoadingVideo(true);
+    fetchLessonVideos().then((data) => {
+      if (isMounted) {
+        setVideoUrls(data);
+        setLoadingVideo(false);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   if (!lesson || !pillar) {
     return (
       <View style={styles.errorContainer}>
@@ -53,6 +75,8 @@ export default function LeconScreen() {
 
   const duration = lesson.duration;
   const phaseColor = pillar.color ?? Colors.brand.gold;
+  const videoUrl = videoUrls[lesson.id];
+  const isVideoLesson = lesson.type === 'video';
 
   const handlePlayPause = () => {
     if (isPlaying) {
@@ -160,10 +184,36 @@ export default function LeconScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.playerCard}>
-          <View style={[styles.playerVisual, { borderColor: phaseColor }]}>
-            <Text style={[styles.playerPillarNum, { color: phaseColor }]}>{pillar.id}</Text>
-            <Text style={styles.playerPillarName}>{pillar.name}</Text>
-          </View>
+
+          {isVideoLesson ? (
+            // ─── Leçon vidéo : lecteur Loom via WebView ───
+            loadingVideo ? (
+              <View style={styles.videoPlaceholder}>
+                <ActivityIndicator color={phaseColor} />
+              </View>
+            ) : videoUrl ? (
+              <View style={styles.videoWrapper}>
+                <WebView
+                  source={{ uri: toLoomEmbedUrl(videoUrl) }}
+                  style={styles.webview}
+                  allowsFullscreenVideo
+                  mediaPlaybackRequiresUserAction={false}
+                  javaScriptEnabled
+                  domStorageEnabled
+                />
+              </View>
+            ) : (
+              <View style={styles.videoPlaceholder}>
+                <Text style={styles.videoPlaceholderTxt}>Vidéo indisponible pour le moment</Text>
+              </View>
+            )
+          ) : (
+            // ─── Leçon audio : lecteur simulé conservé tel quel ───
+            <View style={[styles.playerVisual, { borderColor: phaseColor }]}>
+              <Text style={[styles.playerPillarNum, { color: phaseColor }]}>{pillar.id}</Text>
+              <Text style={styles.playerPillarName}>{pillar.name}</Text>
+            </View>
+          )}
 
           <Text style={styles.playerLabel}>PILIER {pillar.id} · {pillar.name.toUpperCase()}</Text>
           <Text style={styles.playerTitle}>{lesson.title}</Text>
@@ -177,46 +227,50 @@ export default function LeconScreen() {
             </View>
           )}
 
-          <View style={styles.scrubberArea}>
-            <View style={styles.scrubberTrack}>
-              <Animated.View
-                style={[
-                  styles.scrubberFill,
-                  {
-                    width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
-                    backgroundColor: phaseColor,
-                  },
-                ]}
-              />
-              <Animated.View
-                style={[
-                  styles.scrubberKnob,
-                  {
-                    left: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '97%'] }),
-                    backgroundColor: phaseColor,
-                  },
-                ]}
-              />
-            </View>
-            <View style={styles.timeRow}>
-              <Text style={styles.timeText}>{formatTime(elapsed)}</Text>
-              <Text style={styles.timeText}>{formatTime(duration)}</Text>
-            </View>
-          </View>
+          {!isVideoLesson && (
+            <>
+              <View style={styles.scrubberArea}>
+                <View style={styles.scrubberTrack}>
+                  <Animated.View
+                    style={[
+                      styles.scrubberFill,
+                      {
+                        width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                        backgroundColor: phaseColor,
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.scrubberKnob,
+                      {
+                        left: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '97%'] }),
+                        backgroundColor: phaseColor,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeText}>{formatTime(elapsed)}</Text>
+                  <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                </View>
+              </View>
 
-          <View style={styles.controls}>
-            <TouchableOpacity onPress={handleRewind} style={styles.controlBtn}>
-              <Text style={styles.controlTxt}>⟨15</Text>
-            </TouchableOpacity>
+              <View style={styles.controls}>
+                <TouchableOpacity onPress={handleRewind} style={styles.controlBtn}>
+                  <Text style={styles.controlTxt}>⟨15</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity onPress={handlePlayPause} style={[styles.playBtn, { backgroundColor: phaseColor }]}>
-              <Text style={styles.playBtnTxt}>{isPlaying ? '❙❙' : '▶'}</Text>
-            </TouchableOpacity>
+                <TouchableOpacity onPress={handlePlayPause} style={[styles.playBtn, { backgroundColor: phaseColor }]}>
+                  <Text style={styles.playBtnTxt}>{isPlaying ? '❙❙' : '▶'}</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity onPress={handleForward} style={styles.controlBtn}>
-              <Text style={styles.controlTxt}>15⟩</Text>
-            </TouchableOpacity>
-          </View>
+                <TouchableOpacity onPress={handleForward} style={styles.controlBtn}>
+                  <Text style={styles.controlTxt}>15⟩</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
 
         <View style={styles.tabs}>
@@ -322,6 +376,10 @@ const styles = StyleSheet.create({
   playerVisual: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background.primary, marginBottom: Spacing.lg },
   playerPillarNum: { ...Typography.h2 },
   playerPillarName: { ...Typography.caption, color: Colors.text.muted },
+  videoWrapper: { width: '100%', aspectRatio: 16 / 9, borderRadius: Radius.lg, overflow: 'hidden', backgroundColor: '#000', marginBottom: Spacing.lg },
+  webview: { flex: 1, backgroundColor: '#000' },
+  videoPlaceholder: { width: '100%', aspectRatio: 16 / 9, borderRadius: Radius.lg, backgroundColor: Colors.background.primary, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.lg },
+  videoPlaceholderTxt: { ...Typography.body, color: Colors.text.muted, textAlign: 'center', paddingHorizontal: Spacing.lg },
   playerLabel: { ...Typography.labelSmall, color: Colors.text.muted, letterSpacing: 3, marginBottom: Spacing.xs },
   playerTitle: { ...Typography.h4, color: Colors.text.primary, textAlign: 'center', marginBottom: Spacing.xs },
   playerMeta: { ...Typography.caption, color: Colors.text.muted, marginBottom: Spacing.md },

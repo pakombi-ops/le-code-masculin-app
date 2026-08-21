@@ -14,6 +14,7 @@ export default function AuthLayout() {
         animation: 'slide_from_right',
       }}
     >
+      <Stack.Screen name="forgot-password" />
       <Stack.Screen name="splash" />
       <Stack.Screen name="pacte" options={{ gestureEnabled: false }} />
       <Stack.Screen name="quiz" />
