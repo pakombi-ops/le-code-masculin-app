@@ -48,4 +48,5 @@ export const PHASES = {
 } as const;
 
 export const getPillarById = (id: number) => (id === 0 ? PILLAR_ZERO : PILLARS.find((p) => p.id === id));
+export const getPillarBySlug = (slug: string) => PILLARS.find((p) => p.slug === slug);
 export const getPillarsByPhase = (phase: PillarPhase) => PILLARS.filter((p) => p.phase === phase);

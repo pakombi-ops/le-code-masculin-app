@@ -1,54 +1,107 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Switch, Alert, Modal, TextInput,
+  TouchableOpacity, Switch, Alert, Modal, TextInput, Linking, ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import {
+  Bell, Flame, Quote, KeyRound, Download, FileText, Lock,
+  Info, Star, MessageCircle, LogOut, Crown, Gift, Sparkles,CheckSquare,
+} from 'lucide-react-native';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
+import { SafeScreen } from '../../components/layout/SafeScreen';
 import { ProgressBar } from '../../components/ui';
 import { useAuthStore } from '../../store/authStore';
 import { getCompletedLessonIds, getOverallProgress } from '../../constants/progression';
+import { updatePassword } from '../../services/supabase';
+import { getNotificationPrefs, setNotificationPref } from '../../services/notifications';
+import { exportUserData } from '../../services/dataExport';
 
-function StatCard({ value, label }: { value: string | number; label: string }) {
+
+const PRIVACY_URL = 'https://pilierconscient.com/politique-de-confidentialite/';
+const TERMS_URL = 'https://pilierconscient.com/conditions-utilisation/'; // TODO: page a publier
+
+function StatCard({ icon, value, label }: { icon?: React.ReactNode; value: string | number; label: string }) {
   return (
     <View style={styles.statCard}>
+      {icon && <View style={styles.statIcon}>{icon}</View>}
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 }
 
-function SettingRow({ icon, label, value, onPress, isToggle, toggleValue, onToggle, isDestructive }: {
-  icon: string; label: string; value?: string; onPress?: () => void;
-  isToggle?: boolean; toggleValue?: boolean; onToggle?: (v: boolean) => void; isDestructive?: boolean;
+function SettingRow({ icon, label, value, onPress, isToggle, toggleValue, onToggle, isDestructive, loading, badge }: {
+  icon: React.ReactNode; label: string; value?: string; onPress?: () => void;
+  isToggle?: boolean; toggleValue?: boolean; onToggle?: (v: boolean) => void; isDestructive?: boolean; loading?: boolean;
+  badge?: string;
 }) {
   return (
-    <TouchableOpacity style={styles.settingRow} onPress={onPress} disabled={isToggle} activeOpacity={0.7}>
-      <Text style={styles.settingIcon}>{icon}</Text>
-      <Text style={[styles.settingLabel, isDestructive && styles.destructive]}>{label}</Text>
+    <TouchableOpacity style={styles.settingRow} onPress={onPress} disabled={isToggle || loading} activeOpacity={0.7}>
+      <View style={styles.settingIcon}>{icon}</View>
+      <View style={styles.settingLabelRow}>
+        <Text style={[styles.settingLabel, isDestructive && styles.destructive]}>{label}</Text>
+        {badge && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{badge}</Text>
+          </View>
+        )}
+      </View>
       <View style={styles.settingRight}>
-        {isToggle && onToggle
-          ? <Switch value={toggleValue} onValueChange={onToggle} trackColor={{ false: Colors.border.default, true: Colors.brand.gold }} thumbColor={Colors.text.primary} />
-          : value
-            ? <Text style={styles.settingValue}>{value}</Text>
-            : !isDestructive
-              ? <Text style={styles.chevron}>›</Text>
-              : null}
+        {loading
+          ? <ActivityIndicator size="small" color={Colors.brand.gold} />
+          : isToggle && onToggle
+            ? <Switch value={toggleValue} onValueChange={onToggle} trackColor={{ false: Colors.border.default, true: Colors.brand.gold }} thumbColor={Colors.text.primary} />
+            : value
+              ? <Text style={styles.settingValue}>{value}</Text>
+              : !isDestructive
+                ? <Text style={styles.chevron}>›</Text>
+                : null}
       </View>
     </TouchableOpacity>
   );
 }
 
 export default function ProfilScreen() {
-  const { user, streak, aiQuota, logout, linkPurchaseAccount, userProgress } = useAuthStore();
-  const [darkMode, setDarkMode] = useState(true);
+  const insets = useSafeAreaInsets();
+  const { user, streak, aiQuota, logout, userProgress } = useAuthStore();
   const [notifSession, setNotifSession] = useState(true);
   const [notifStreak, setNotifStreak] = useState(true);
   const [notifCitation, setNotifCitation] = useState(true);
-  const [faceId, setFaceId] = useState(false);
-  const [linkModalVisible, setLinkModalVisible] = useState(false);
-  const [linkEmail, setLinkEmail] = useState('');
-  const [linking, setLinking] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    getNotificationPrefs().then((prefs) => {
+      setNotifSession(prefs.session);
+      setNotifStreak(prefs.streak);
+      setNotifCitation(prefs.citation);
+    });
+  }, []);
+
+  const handleToggleSession = async (value: boolean) => {
+    setNotifSession(value); // optimiste — corrige si la permission est refusee
+    const prefs = await setNotificationPref('session', value);
+    setNotifSession(prefs.session);
+  };
+
+  const handleToggleStreak = async (value: boolean) => {
+    setNotifStreak(value);
+    const prefs = await setNotificationPref('streak', value);
+    setNotifStreak(prefs.streak);
+  };
+
+  const handleToggleCitation = async (value: boolean) => {
+    setNotifCitation(value);
+    const prefs = await setNotificationPref('citation', value);
+    setNotifCitation(prefs.citation);
+  };
+
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
 
   const prenom = user?.prenom ?? user?.name ?? 'Utilisateur';
   const email = user?.email ?? '';
@@ -63,15 +116,15 @@ export default function ProfilScreen() {
 
   const memberSince = user?.created_at
     ? new Date(user.created_at).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-    : 'Récemment';
+    : 'Recemment';
 
   const handleLogout = () => {
     Alert.alert(
-      'Se déconnecter',
-      'Es-tu sûr de vouloir te déconnecter ?',
+      'Se deconnecter',
+      'Es-tu sur de vouloir te deconnecter ?',
       [
         { text: 'Annuler', style: 'cancel' },
-        { text: 'Se déconnecter', style: 'destructive', onPress: async () => {
+        { text: 'Se deconnecter', style: 'destructive', onPress: async () => {
           await logout();
           router.replace('/(auth)/splash');
         }},
@@ -79,36 +132,59 @@ export default function ProfilScreen() {
     );
   };
 
-  const handleLinkAccount = async () => {
-    if (!linkEmail.trim() || !user?.id) return;
-    setLinking(true);
-    const result = await linkPurchaseAccount(linkEmail.trim(), user.id);
-    setLinking(false);
+  const handleChangePassword = async () => {
+    setPasswordError('');
 
-    if (result.linked) {
-      Alert.alert('Compte lié !', 'Ton accès premium est maintenant actif.');
-      setLinkModalVisible(false);
-      setLinkEmail('');
-    } else if (result.reason === 'no_customer') {
-      Alert.alert('Introuvable', "Aucun achat trouvé avec cet email. Vérifie l'orthographe ou achète un plan sur pilierconscient.com.");
-    } else if (result.reason === 'no_active_subscription') {
-      Alert.alert("Pas d'abonnement actif", "Cet email existe mais n'a pas d'abonnement actif actuellement.");
-    } else if (result.reason === 'email_mismatch') {
-      Alert.alert(
-        'Email différent',
-        "Pour ta sécurité, seul l'email de ton compte peut être relié. Entre l'adresse de ton compte, ou contacte le support si tu as payé avec une autre adresse."
-      );
-    } else if (result.reason === 'email_not_verified') {
-      Alert.alert('Email non confirmé', "Confirme d'abord l'adresse email de ton compte, puis réessaie.");
-    } else if (result.reason === 'no_session' || result.reason === 'unauthorized') {
-      Alert.alert('Session expirée', 'Reconnecte-toi, puis réessaie.');
-    } else {
-      Alert.alert('Erreur', 'Impossible de vérifier ton achat pour le moment.');
+    if (newPassword.length < 8) {
+      setPasswordError('8 caracteres minimum.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordError('Les mots de passe ne correspondent pas.');
+      return;
+    }
+
+    setChangingPassword(true);
+    const { error } = await updatePassword(newPassword);
+    setChangingPassword(false);
+
+    if (error) {
+      setPasswordError("Impossible de changer le mot de passe. Reessaie.");
+      return;
+    }
+
+    setPasswordModalVisible(false);
+    setNewPassword('');
+    setConfirmNewPassword('');
+    Alert.alert('C\'est fait', 'Ton mot de passe a ete mis a jour.');
+  };
+
+  const openPrivacy = () => {
+    Linking.openURL(PRIVACY_URL).catch(() =>
+      Alert.alert('Erreur', "Impossible d'ouvrir la page pour le moment.")
+    );
+  };
+
+  const openTerms = () => {
+    Linking.openURL(TERMS_URL).catch(() =>
+      Alert.alert('Erreur', "Impossible d'ouvrir la page pour le moment.")
+    );
+  };
+
+  const handleExportData = async () => {
+    if (!user?.id) return;
+    setExporting(true);
+    try {
+      await exportUserData(user.id);
+    } catch (e) {
+      Alert.alert('Erreur', "L'export n'a pas pu etre genere. Reessaie dans un instant.");
+    } finally {
+      setExporting(false);
     }
   };
 
   return (
-    <View style={styles.container}>
+    <SafeScreen edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
 
         {/* Header */}
@@ -119,7 +195,7 @@ export default function ProfilScreen() {
             </View>
             {isPremium && (
               <View style={styles.avatarBadge}>
-                <Text style={styles.avatarBadgeTxt}>✦</Text>
+                <Sparkles size={12} color={Colors.text.inverse} />
               </View>
             )}
           </View>
@@ -129,11 +205,11 @@ export default function ProfilScreen() {
           {email ? <Text style={styles.email}>{email}</Text> : null}
         </View>
 
-        {/* Stats réelles */}
+        {/* Stats reelles */}
         <View style={styles.statsRow}>
-          <StatCard value={`🔥 ${currentStreak}`} label="Jours de feu" />
+          <StatCard icon={<Flame size={16} color={Colors.brand.gold} />} value={currentStreak} label="Jours de feu" />
           <StatCard value={`${longestStreak}`} label="Record streak" />
-         <StatCard value={isPremium ? '∞' : `${Math.max(0, 10 - messagesUsed)}/10`} label="Messages IA" />
+          <StatCard value={isPremium ? '∞' : `${Math.max(0, 10 - messagesUsed)}/10`} label="Messages IA" />
         </View>
 
         {/* Progression */}
@@ -146,12 +222,32 @@ export default function ProfilScreen() {
           <Text style={styles.progressSub}>{progressPercent}% accompli · Continue !</Text>
         </View>
 
+                 {/* Tracker 90 Jours */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Suivi quotidien</Text>
+          <View style={styles.settingsCard}>
+            <SettingRow
+              icon={<CheckSquare size={18} color={Colors.text.secondary} />}
+              label="Tracker 90 Jours"
+              badge={!isPremium ? 'PREMIUM' : undefined}
+              onPress={() => router.push('/tracker')}
+            />
+          </View>
+        </View>
+
         {/* Abonnement */}
+        {/* CORRIGE : le bouton "J'ai deja achete" ouvrait une modale
+            avec son propre formulaire de liaison de compte (troisieme
+            implementation du meme flux). Redirige maintenant vers
+            l'ecran /paywall unique (hero, prix, features, temoignages,
+            lien "relier mon compte" integre). */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Mon abonnement</Text>
           <View style={styles.subscriptionCard}>
             <View style={styles.subscriptionLeft}>
-              <Text style={styles.subscriptionIcon}>{isPremium ? '👑' : '🆓'}</Text>
+              {isPremium
+                ? <Crown size={28} color={Colors.brand.gold} />
+                : <Gift size={28} color={Colors.text.muted} />}
               <View>
                 <Text style={styles.subscriptionTier}>{isPremium ? 'Plan Premium' : 'Plan Gratuit'}</Text>
                 <Text style={styles.subscriptionPrice}>
@@ -160,18 +256,10 @@ export default function ProfilScreen() {
               </View>
             </View>
             {!isPremium && (
-              <TouchableOpacity onPress={() => setLinkModalVisible(true)}>
-                <Text style={styles.upgradeLink}>J'ai déjà acheté</Text>
+              <TouchableOpacity onPress={() => router.push('/paywall')}>
+                <Text style={styles.upgradeLink}>Voir les plans</Text>
               </TouchableOpacity>
             )}
-          </View>
-        </View>
-
-        {/* Apparence */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Apparence</Text>
-          <View style={styles.settingsCard}>
-            <SettingRow icon="🌙" label="Mode sombre" isToggle toggleValue={darkMode} onToggle={setDarkMode} />
           </View>
         </View>
 
@@ -179,101 +267,151 @@ export default function ProfilScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Notifications</Text>
           <View style={styles.settingsCard}>
-            <SettingRow icon="🔔" label="Rappel de session" isToggle toggleValue={notifSession} onToggle={setNotifSession} />
+            <SettingRow
+              icon={<Bell size={18} color={Colors.text.secondary} />}
+              label="Nouveau contenu disponible"
+              isToggle toggleValue={notifSession} onToggle={handleToggleSession}
+            />
             <View style={styles.separator} />
-            <SettingRow icon="🔥" label="Alerte streak en danger" isToggle toggleValue={notifStreak} onToggle={setNotifStreak} />
+            <SettingRow
+              icon={<Flame size={18} color={Colors.text.secondary} />}
+              label="Alerte streak en danger"
+              isToggle toggleValue={notifStreak} onToggle={handleToggleStreak}
+            />
             <View style={styles.separator} />
-            <SettingRow icon="✦" label="Citation hebdomadaire" isToggle toggleValue={notifCitation} onToggle={setNotifCitation} />
+            <SettingRow
+              icon={<Quote size={18} color={Colors.text.secondary} />}
+              label="Citation hebdomadaire"
+              isToggle toggleValue={notifCitation} onToggle={handleToggleCitation}
+            />
           </View>
         </View>
 
-        {/* Sécurité */}
+        {/* Securite */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Sécurité</Text>
+          <Text style={styles.sectionTitle}>Securite</Text>
           <View style={styles.settingsCard}>
-            <SettingRow icon="⬡" label="Face ID / Empreinte" isToggle toggleValue={faceId} onToggle={setFaceId} />
-            <View style={styles.separator} />
-            <SettingRow icon="🔑" label="Changer le mot de passe" onPress={() => Alert.alert('Bientôt disponible')} />
+            <SettingRow
+              icon={<KeyRound size={18} color={Colors.text.secondary} />}
+              label="Changer le mot de passe"
+              onPress={() => setPasswordModalVisible(true)}
+            />
           </View>
         </View>
 
-        {/* Données */}
+        {/* Donnees */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Mes données</Text>
+          <Text style={styles.sectionTitle}>Mes donnees</Text>
           <View style={styles.settingsCard}>
-            <SettingRow icon="📤" label="Exporter mes données" onPress={() => Alert.alert('Export', 'Bientôt disponible.')} />
+            <SettingRow
+              icon={<Download size={18} color={Colors.text.secondary} />}
+              label="Exporter mes donnees"
+              onPress={handleExportData}
+              loading={exporting}
+            />
             <View style={styles.separator} />
-            <SettingRow icon="📋" label="Conditions d'utilisation" onPress={() => Alert.alert('CGU', 'pilierconscient.com/cgu')} />
+            <SettingRow
+              icon={<FileText size={18} color={Colors.text.secondary} />}
+              label="Conditions d'utilisation"
+              onPress={openTerms}
+            />
             <View style={styles.separator} />
-            <SettingRow icon="🔒" label="Confidentialité" onPress={() => Alert.alert('Confidentialité', 'pilierconscient.com/privacy')} />
+            <SettingRow
+              icon={<Lock size={18} color={Colors.text.secondary} />}
+              label="Confidentialite"
+              onPress={openPrivacy}
+            />
           </View>
         </View>
 
-        {/* À propos */}
+        {/* A propos */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>À propos</Text>
+          <Text style={styles.sectionTitle}>A propos</Text>
           <View style={styles.settingsCard}>
-            <SettingRow icon="ℹ️" label="Version" value="1.0.0" />
+            <SettingRow icon={<Info size={18} color={Colors.text.secondary} />} label="Version" value="1.0.0" />
             <View style={styles.separator} />
-            <SettingRow icon="⭐" label="Noter l'app" onPress={() => Alert.alert('Merci !', 'Bientôt disponible sur le Store.')} />
+            <SettingRow
+              icon={<Star size={18} color={Colors.text.secondary} />}
+              label="Noter l'app"
+              onPress={() => Alert.alert('Merci !', 'Bientot disponible sur le Store.')}
+            />
             <View style={styles.separator} />
-            <SettingRow icon="💬" label="Support" onPress={() => Alert.alert('Support', 'support@pilierconscient.com')} />
+            <SettingRow
+              icon={<MessageCircle size={18} color={Colors.text.secondary} />}
+              label="Support"
+              onPress={() => Alert.alert('Support', 'support@pilierconscient.com')}
+            />
           </View>
         </View>
 
-        {/* Déconnexion */}
+        {/* Deconnexion */}
         <View style={[styles.section, { marginBottom: Spacing['5xl'] }]}>
           <View style={styles.settingsCard}>
-            <SettingRow icon="🚪" label="Se déconnecter" onPress={handleLogout} isDestructive />
+            <SettingRow
+              icon={<LogOut size={18} color={Colors.status.error} />}
+              label="Se deconnecter"
+              onPress={handleLogout}
+              isDestructive
+            />
           </View>
         </View>
 
         <Text style={styles.signature}>
           Pilier Conscient · Prince Johann Akombi{'\n'}Le Code Masculin v1.0
         </Text>
+        {/* Dégagement dynamique : hauteur de la pill + marge + inset système */}
+        <View style={{ height: 68 + 16 + insets.bottom + 16 }} />
       </ScrollView>
 
-      <Modal visible={linkModalVisible} transparent animationType="slide" onRequestClose={() => setLinkModalVisible(false)}>
+      <Modal visible={passwordModalVisible} transparent animationType="slide" onRequestClose={() => setPasswordModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Lier ton compte</Text>
-            <Text style={styles.modalSubtitle}>Entre l'email utilisé lors de ton achat sur pilierconscient.com</Text>
+            <Text style={styles.modalTitle}>Changer le mot de passe</Text>
+            <Text style={styles.modalSubtitle}>Choisis un nouveau mot de passe pour ton compte</Text>
+            {passwordError ? <Text style={styles.modalError}>{passwordError}</Text> : null}
             <TextInput
               style={styles.modalInput}
-              placeholder="ton@email.com"
+              placeholder="Nouveau mot de passe"
               placeholderTextColor={Colors.text.muted}
-              value={linkEmail}
-              onChangeText={setLinkEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry
             />
-            <TouchableOpacity style={styles.modalButton} onPress={handleLinkAccount} disabled={linking}>
-              <Text style={styles.modalButtonText}>{linking ? 'Vérification...' : 'Vérifier'}</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Confirme le mot de passe"
+              placeholderTextColor={Colors.text.muted}
+              value={confirmNewPassword}
+              onChangeText={setConfirmNewPassword}
+              secureTextEntry
+            />
+            <TouchableOpacity style={styles.modalButton} onPress={handleChangePassword} disabled={changingPassword}>
+              <Text style={styles.modalButtonText}>{changingPassword ? 'Mise a jour...' : 'Confirmer'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setLinkModalVisible(false)}>
+            <TouchableOpacity onPress={() => { setPasswordModalVisible(false); setPasswordError(''); setNewPassword(''); setConfirmNewPassword(''); }}>
               <Text style={styles.modalCancel}>Annuler</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background.primary },
-  header: { alignItems: 'center', paddingTop: 60, paddingBottom: Spacing.xl, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
+  header: { alignItems: 'center', paddingTop: Spacing.xl, paddingBottom: Spacing.xl, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
   avatarWrapper: { position: 'relative', marginBottom: Spacing.md },
   avatarCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.background.secondary, borderWidth: 2, borderColor: Colors.brand.gold, alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { ...Typography.h1, color: Colors.brand.gold },
   avatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 24, height: 24, borderRadius: 12, backgroundColor: Colors.brand.gold, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: Colors.background.primary },
-  avatarBadgeTxt: { fontSize: 10, color: Colors.text.inverse },
   name: { ...Typography.h2, color: Colors.text.primary, marginBottom: 4 },
   niveau: { ...Typography.body, color: Colors.brand.gold, fontStyle: 'italic', marginBottom: 4 },
   since: { ...Typography.caption, color: Colors.text.muted },
   email: { ...Typography.caption, color: Colors.text.muted, marginTop: 2 },
   statsRow: { flexDirection: 'row', paddingHorizontal: Spacing.base, paddingVertical: Spacing.lg, gap: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
   statCard: { flex: 1, backgroundColor: Colors.background.secondary, borderRadius: Radius.md, padding: Spacing.sm, alignItems: 'center', borderWidth: 1, borderColor: Colors.border.default },
+  statIcon: { marginBottom: 2 },
   statValue: { ...Typography.h4, color: Colors.text.primary, marginBottom: 2 },
   statLabel: { ...Typography.caption, color: Colors.text.muted, textAlign: 'center' },
   section: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.xl },
@@ -284,14 +422,13 @@ const styles = StyleSheet.create({
   progressSub: { ...Typography.caption, color: Colors.text.muted, marginTop: Spacing.xs },
   subscriptionCard: { backgroundColor: Colors.background.secondary, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.brand.gold, padding: Spacing.base, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   subscriptionLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, flex: 1 },
-  subscriptionIcon: { fontSize: 28 },
   subscriptionTier: { ...Typography.h4, color: Colors.text.primary },
   subscriptionPrice: { ...Typography.body, color: Colors.brand.gold },
   upgradeLink: { ...Typography.body, color: Colors.brand.gold, fontWeight: '600' },
   settingsCard: { backgroundColor: Colors.background.secondary, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border.default, overflow: 'hidden' },
   settingRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.base, paddingVertical: Spacing.md + 2, gap: Spacing.md },
-  settingIcon: { fontSize: 18, width: 24, textAlign: 'center' },
-  settingLabel: { ...Typography.body, color: Colors.text.primary, flex: 1 },
+  settingIcon: { width: 24, alignItems: 'center', justifyContent: 'center' },
+  settingLabel: { ...Typography.body, color: Colors.text.primary },
   settingRight: { alignItems: 'flex-end' },
   settingValue: { ...Typography.body, color: Colors.text.muted },
   chevron: { fontSize: 20, color: Colors.text.muted },
@@ -302,8 +439,12 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: Colors.background.secondary, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl, paddingBottom: Spacing['3xl'] },
   modalTitle: { ...Typography.h3, color: Colors.text.primary, marginBottom: Spacing.sm },
   modalSubtitle: { ...Typography.body, color: Colors.text.secondary, marginBottom: Spacing.lg },
-  modalInput: { backgroundColor: Colors.background.tertiary, borderRadius: Radius.md, padding: Spacing.md, color: Colors.text.primary, marginBottom: Spacing.lg },
+  modalError: { ...Typography.bodySmall, color: Colors.status.error, backgroundColor: Colors.status.errorBg, padding: Spacing.md, borderRadius: Radius.md, marginBottom: Spacing.md },
+  modalInput: { backgroundColor: Colors.background.tertiary, borderRadius: Radius.md, padding: Spacing.md, color: Colors.text.primary, marginBottom: Spacing.md },
   modalButton: { backgroundColor: Colors.brand.gold, borderRadius: Radius.md, paddingVertical: Spacing.md, alignItems: 'center', marginBottom: Spacing.md },
   modalButtonText: { ...Typography.button, color: Colors.text.inverse },
   modalCancel: { ...Typography.body, color: Colors.text.muted, textAlign: 'center' },
+    settingLabelRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  badge: { borderWidth: 1, borderColor: Colors.brand.gold, borderRadius: Radius.sm, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeText: { ...Typography.caption, color: Colors.brand.gold, fontSize: 10, fontWeight: '700' },
 });

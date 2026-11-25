@@ -1,6 +1,6 @@
 import { getAllLessons } from './lessons';
 
-export type ResourceType = 'audio' | 'pdf' | 'template' | 'video' | 'ebook';
+export type ResourceType = 'audio' | 'pdf' | 'template' | 'video' | 'ebook' | 'podcast' | 'article';
 export type ResourceAccess = 'free' | 'premium';
 
 export interface Resource {
@@ -166,18 +166,20 @@ export const RESOURCES: Resource[] = buildResources();
 
 export const RESOURCE_TYPES = [
   { key: 'all',      label: 'Tout' },
-  { key: 'ebook',    label: '📚 eBooks' },  // ← ajouter en 2ème position
+  { key: 'ebook',    label: '📚 eBooks' },
   { key: 'audio',    label: '🎧 Audios' },
+  { key: 'podcast',  label: '🎙️ Podcast' },
+  { key: 'article',  label: '📰 Articles' },
   { key: 'pdf',      label: '📄 PDFs' },
   { key: 'template', label: '📋 Templates' },
 ];
 
 export function getTypeIcon(type: ResourceType): string {
-  return { audio:'🎧', pdf:'📄', template:'📋', video:'▶️', ebook:'📚' }[type] ?? '📁';
+  return { audio:'🎧', pdf:'📄', template:'📋', video:'▶️', ebook:'📚', podcast:'🎙️', article:'📰' }[type] ?? '📁';
 }
 
 export function getTypeLabel(type: ResourceType): string {
-  return { audio:'Audio guidé', pdf:'PDF', template:'Template', video:'Vidéo', ebook:'eBook' }[type] ?? 'Fichier';
+  return { audio:'Audio guidé', pdf:'PDF', template:'Template', video:'Vidéo', ebook:'eBook', podcast:'Podcast', article:'Article' }[type] ?? 'Fichier';
 }
 
 export function getUnlockedResources(): Resource[] {

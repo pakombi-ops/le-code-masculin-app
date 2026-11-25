@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Modal, Alert, ActivityIndicator,
+  TextInput, Modal, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -17,8 +17,15 @@ interface JournalEntry {
   created_at: string;
 }
 
+const STOIC_QUESTIONS = [
+  { key: 'lossOfCenter', label: 'Où ai-je perdu mon centre aujourd\'hui ?', placeholder: 'Le moment où j\'ai réagi plutôt que choisi...' },
+  { key: 'betterResponse', label: 'Comment aurais-je pu répondre mieux ?', placeholder: 'Pas pour te flageller — pour apprendre...' },
+  { key: 'lesson', label: 'Qu\'ai-je appris ?', placeholder: 'La leçon concrète, celle que tu n\'oublieras pas demain...' },
+] as const;
+
 export default function JournalScreen() {
-  const { user } = useAuthStore();
+  const { user, aiQuota } = useAuthStore();
+  const isPremium = aiQuota?.is_premium ?? false;
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -27,6 +34,14 @@ export default function JournalScreen() {
   const [saving, setSaving] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Journal guidé du soir — 3 questions fixes + intention
+  const [guidedModalVisible, setGuidedModalVisible] = useState(false);
+  const [lossOfCenter, setLossOfCenter] = useState('');
+  const [betterResponse, setBetterResponse] = useState('');
+  const [lesson, setLesson] = useState('');
+  const [intention, setIntention] = useState('');
+  const [savingGuided, setSavingGuided] = useState(false);
 
   const loadEntries = useCallback(async () => {
     if (!user?.id) return;
@@ -64,6 +79,55 @@ export default function JournalScreen() {
     setContent('');
     setEditingId(null);
     setModalVisible(false);
+    loadEntries();
+  };
+
+  const resetGuidedFields = () => {
+    setLossOfCenter('');
+    setBetterResponse('');
+    setLesson('');
+    setIntention('');
+  };
+
+  const handleSaveGuided = async () => {
+    if (!user?.id) return;
+
+    if (!isPremium) {
+      setGuidedModalVisible(false);
+      router.push('/feature-info/journal'); // CHANGÉ
+      return;
+    }
+
+    if (!lossOfCenter.trim() || !betterResponse.trim() || !lesson.trim() || !intention.trim()) {
+      Alert.alert('Champs requis', 'Réponds aux 3 questions et formule ton intention pour demain avant d\'enregistrer.');
+      return;
+    }
+
+    setSavingGuided(true);
+
+    const dateLabel = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+    const formattedContent =
+      `Où j'ai perdu mon centre :\n${lossOfCenter.trim()}\n\n` +
+      `Comment j'aurais pu répondre mieux :\n${betterResponse.trim()}\n\n` +
+      `Ce que j'ai appris :\n${lesson.trim()}\n\n` +
+      `Intention pour demain :\n${intention.trim()}`;
+
+    const { error } = await saveJournalEntry({
+      userId: user.id,
+      pillarId: 8,
+      title: `Journal du soir — ${dateLabel}`,
+      content: formattedContent,
+    });
+
+    setSavingGuided(false);
+
+    if (error) {
+      Alert.alert('Erreur', "Impossible d'enregistrer ton journal pour le moment.");
+      return;
+    }
+
+    resetGuidedFields();
+    setGuidedModalVisible(false);
     loadEntries();
   };
 
@@ -115,8 +179,21 @@ export default function JournalScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
         <View style={styles.content}>
+          <TouchableOpacity
+            style={styles.guidedEntryBtn}
+            onPress={() => {
+              if (!isPremium) {
+                router.push('/feature-info/journal'); // CHANGÉ
+                return;
+              }
+              setGuidedModalVisible(true);
+            }}
+          >
+            <Text style={styles.guidedEntryBtnTxt}>🌙 Journal guidé du soir</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.newEntryBtn} onPress={() => setModalVisible(true)}>
-            <Text style={styles.newEntryBtnTxt}>+ Nouvelle entrée</Text>
+            <Text style={styles.newEntryBtnTxt}>+ Nouvelle entrée libre</Text>
           </TouchableOpacity>
 
           {loading ? (
@@ -148,7 +225,7 @@ export default function JournalScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal — nouvelle entrée */}
+      {/* Modal — nouvelle entrée libre */}
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -181,40 +258,96 @@ export default function JournalScreen() {
         </View>
       </Modal>
 
+            {/* Modal — journal guidé du soir (3 questions + intention) */}
+      <Modal visible={guidedModalVisible} transparent animationType="slide" onRequestClose={() => setGuidedModalVisible(false)}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <Text style={styles.modalTitle}>Journal du soir</Text>
+                <Text style={styles.guidedIntro}>
+                  Prends une minute. Laisse la journée se déposer. Tu n'es pas ici pour te juger — tu es ici pour apprendre.
+                </Text>
+
+                {STOIC_QUESTIONS.map((q) => {
+                  const value = q.key === 'lossOfCenter' ? lossOfCenter : q.key === 'betterResponse' ? betterResponse : lesson;
+                  const setValue = q.key === 'lossOfCenter' ? setLossOfCenter : q.key === 'betterResponse' ? setBetterResponse : setLesson;
+                  return (
+                    <View key={q.key} style={{ marginBottom: Spacing.md }}>
+                      <Text style={styles.guidedLabel}>{q.label}</Text>
+                      <TextInput
+                        style={[styles.modalInput, styles.guidedTextarea]}
+                        placeholder={q.placeholder}
+                        placeholderTextColor={Colors.text.muted}
+                        value={value}
+                        onChangeText={setValue}
+                        multiline
+                        textAlignVertical="top"
+                      />
+                    </View>
+                  );
+                })}
+
+                <View style={{ marginBottom: Spacing.md }}>
+                  <Text style={styles.guidedLabel}>Intention pour demain</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="Demain, je serai [qualité] dans [contexte]."
+                    placeholderTextColor={Colors.text.muted}
+                    value={intention}
+                    onChangeText={setIntention}
+                  />
+                </View>
+
+                <TouchableOpacity style={styles.modalButton} onPress={handleSaveGuided} disabled={savingGuided}>
+                  <Text style={styles.modalButtonText}>{savingGuided ? 'Enregistrement...' : 'Enregistrer'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { setGuidedModalVisible(false); resetGuidedFields(); }}>
+                  <Text style={styles.modalCancel}>Annuler</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Modal — lecture d'une entrée */}
       <Modal visible={!!selectedEntry} transparent animationType="fade" onRequestClose={() => setSelectedEntry(null)}>
-  <View style={styles.modalOverlay}>
-    <View style={styles.modalContent}>
-      {selectedEntry && (
-        <>
-          <Text style={styles.entryDate}>{formatDate(selectedEntry.created_at)}</Text>
-          <Text style={styles.modalTitle}>{selectedEntry.title}</Text>
-          <ScrollView style={{ maxHeight: 350, marginBottom: Spacing.lg }}>
-            <Text style={styles.entryContent}>{selectedEntry.content}</Text>
-          </ScrollView>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {selectedEntry && (
+              <>
+                <Text style={styles.entryDate}>{formatDate(selectedEntry.created_at)}</Text>
+                <Text style={styles.modalTitle}>{selectedEntry.title}</Text>
+                <ScrollView style={{ maxHeight: 350, marginBottom: Spacing.lg }}>
+                  <Text style={styles.entryContent}>{selectedEntry.content}</Text>
+                </ScrollView>
 
-          <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md }}>
-            <TouchableOpacity
-              style={[styles.modalButton, { flex: 1, backgroundColor: Colors.background.tertiary }]}
-              onPress={() => handleEdit(selectedEntry)}
-            >
-              <Text style={[styles.modalButtonText, { color: Colors.text.primary }]}>✏️ Modifier</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalButton, { flex: 1, backgroundColor: Colors.status.errorBg }]}
-              onPress={() => handleDelete(selectedEntry)}
-            >
-              <Text style={[styles.modalButtonText, { color: Colors.status.error }]}>🗑 Supprimer</Text>
+                <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md }}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { flex: 1, backgroundColor: Colors.background.tertiary }]}
+                    onPress={() => handleEdit(selectedEntry)}
+                  >
+                    <Text style={[styles.modalButtonText, { color: Colors.text.primary }]}>✏️ Modifier</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { flex: 1, backgroundColor: Colors.status.errorBg }]}
+                    onPress={() => handleDelete(selectedEntry)}
+                  >
+                    <Text style={[styles.modalButtonText, { color: Colors.status.error }]}>🗑 Supprimer</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+            <TouchableOpacity onPress={() => setSelectedEntry(null)}>
+              <Text style={styles.modalCancel}>Fermer</Text>
             </TouchableOpacity>
           </View>
-        </>
-      )}
-      <TouchableOpacity onPress={() => setSelectedEntry(null)}>
-        <Text style={styles.modalCancel}>Fermer</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-</Modal>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -231,6 +364,12 @@ const styles = StyleSheet.create({
   headerTitle: { ...Typography.h4, color: Colors.text.primary },
   scroll: { flex: 1 },
   content: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg },
+  guidedEntryBtn: {
+    backgroundColor: Colors.background.secondary, borderRadius: Radius.md,
+    borderWidth: 1, borderColor: Colors.brand.gold,
+    paddingVertical: Spacing.md, alignItems: 'center', marginBottom: Spacing.sm,
+  },
+  guidedEntryBtnTxt: { ...Typography.button, color: Colors.brand.gold },
   newEntryBtn: {
     backgroundColor: Colors.brand.gold, borderRadius: Radius.md,
     paddingVertical: Spacing.md, alignItems: 'center', marginBottom: Spacing.xl,
@@ -254,7 +393,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
     padding: Spacing.xl, paddingBottom: Spacing['3xl'],
   },
-  modalTitle: { ...Typography.h3, color: Colors.text.primary, marginBottom: Spacing.lg },
+  modalTitle: { ...Typography.h3, color: Colors.text.primary, marginBottom: Spacing.sm },
+  guidedIntro: { ...Typography.body, color: Colors.text.secondary, marginBottom: Spacing.lg, lineHeight: 22 },
+  guidedLabel: { ...Typography.label, color: Colors.brand.gold, marginBottom: Spacing.xs },
+  guidedTextarea: { minHeight: 80 },
   modalInput: {
     backgroundColor: Colors.background.tertiary, borderRadius: Radius.md,
     padding: Spacing.md, color: Colors.text.primary, marginBottom: Spacing.md,

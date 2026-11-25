@@ -10,3 +10,7 @@ dist/
 
 expo-env.d.ts
 # @end expo-cli
+# Identifiants locaux (SMTP, etc.)
+SMTP *.txt
+xsmtpsib-*.txt
+fce15784-*.txt

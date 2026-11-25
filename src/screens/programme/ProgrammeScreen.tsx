@@ -1,8 +1,11 @@
 import React, { useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import { Lock, Flag } from 'lucide-react-native';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
+import { SafeScreen } from '../../components/layout/SafeScreen';
 import { ProgressBar, Badge } from '../../components/ui';
 import { PILLARS, PHASES, type Pillar, type PillarPhase } from '../../constants/pillars';
 import { useAuthStore } from '../../store/authStore';
@@ -16,6 +19,7 @@ import { PILLAR_ZERO } from '../../constants/pillars';
 import { isModuleZeroCompleted } from '../../constants/progression';
 
 export default function ProgrammeScreen() {
+  const insets = useSafeAreaInsets();
   const { user, entitlement, checkEntitlement, userProgress, loadUserProgress } = useAuthStore();
   const phases: PillarPhase[] = ['fondation', 'identite', 'impact'];
 
@@ -72,37 +76,37 @@ export default function ProgrammeScreen() {
         <View style={styles.pillarBadge}>
           {isCompleted && <Badge label="✓ COMPLÉTÉ" variant="completed" />}
           {isActive && <Badge label="EN COURS" variant="active" />}
-          {isLocked && <Text style={styles.lockIcon}>🔒</Text>}
+          {isLocked && <Lock size={16} color={Colors.text.muted} style={styles.lockIcon} />}
         </View>
       </TouchableOpacity>
     );
   };
 
+  // CORRIGÉ : le lien "J'ai déjà acheté" pointait vers /(tabs)/profil au
+  // lieu du paywall complet. Redirige maintenant vers le vrai écran
+  // /paywall (hero, prix, features, témoignages, lien "relier mon compte").
   if (!entitlement.active) {
     return (
-      <View style={styles.container}>
+      <SafeScreen edges={['top']}>
         <View style={paywallStyles.container}>
-          <Text style={paywallStyles.icon}>🔒</Text>
+          <Lock size={48} color={Colors.brand.gold} style={paywallStyles.icon} />
           <Text style={paywallStyles.title}>Le programme t'attend</Text>
           <Text style={paywallStyles.subtitle}>
             Débloque les 52 semaines et les 12 piliers du Code Masculin.
           </Text>
           <TouchableOpacity
             style={paywallStyles.ctaButton}
-            onPress={() => Linking.openURL('https://pilierconscient.com/le-code-masculin-redeviens-lhomme-que-tu-sais-etre/')}
+            onPress={() => router.push('/feature-info/programme')} // CHANGÉ
           >
             <Text style={paywallStyles.ctaText}>Voir les plans</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/(tabs)/profil')}>
-            <Text style={paywallStyles.linkText}>J'ai déjà acheté — lier mon compte</Text>
-          </TouchableOpacity>
         </View>
-      </View>
+      </SafeScreen>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeScreen edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Mon Programme</Text>
@@ -123,7 +127,7 @@ export default function ProgrammeScreen() {
     activeOpacity={0.8}
   >
     <View style={[styles.pillarIconBg, { borderColor: PILLAR_ZERO.color }]}>
-      <Text style={{ fontSize: 20 }}>🚩</Text>
+      <Flag size={20} color={PILLAR_ZERO.color} />
     </View>
     <View style={styles.pillarInfo}>
       <Text style={styles.pillarName}>{PILLAR_ZERO.name}</Text>
@@ -160,16 +164,18 @@ export default function ProgrammeScreen() {
             );
           })}
         </View>
-        <View style={{ height: Spacing['3xl'] }} />
+        {/* Dégagement dynamique : hauteur de la pill (68) + sa marge (16)
+            + l'inset système réel de l'appareil + marge de respiration */}
+        <View style={{ height: 68 + 16 + insets.bottom + 16 }} />
       </ScrollView>
-    </View>
+    </SafeScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background.primary },
   header: {
-    paddingHorizontal: Spacing.xl, paddingTop: Spacing['3xl'],
+    paddingHorizontal: Spacing.xl, paddingTop: Spacing.xl,
     paddingBottom: Spacing.lg,
     borderBottomWidth: 1, borderBottomColor: Colors.border.subtle,
   },
@@ -207,12 +213,12 @@ const styles = StyleSheet.create({
   lessonProgress: { marginTop: Spacing.xs },
   pillarBadge: { alignItems: 'flex-end' },
   textMuted: { color: Colors.text.muted },
-  lockIcon: { fontSize: 16, opacity: 0.6 },
+  lockIcon: { opacity: 0.6 },
 });
 
 const paywallStyles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
-  icon: { fontSize: 48, marginBottom: Spacing.lg },
+  icon: { marginBottom: Spacing.lg },
   title: { ...Typography.h2, color: Colors.text.primary, marginBottom: Spacing.sm, textAlign: 'center' },
   subtitle: { ...Typography.body, color: Colors.text.secondary, textAlign: 'center', marginBottom: Spacing.xl },
   ctaButton: { backgroundColor: Colors.brand.gold, borderRadius: Radius.md, paddingVertical: Spacing.md, paddingHorizontal: Spacing.xl, marginBottom: Spacing.md },

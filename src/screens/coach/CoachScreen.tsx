@@ -1,14 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  FlatList, KeyboardAvoidingView, Platform,
+  FlatList, KeyboardAvoidingView, Platform, Keyboard,
   ActivityIndicator, Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MessageSquareText, Users } from 'lucide-react-native';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
+import { SafeScreen } from '../../components/layout/SafeScreen';
 import { useAuthStore, selectCanUseAI, selectRemainingMessages } from '../../store/authStore';
 import { supabase, saveMessage, getConversationHistory } from '../../services/supabase';
 import { sendCoachMessage, ServerQuota } from '../../services/coachChat';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CoachIntroOverlay } from '../../components/CoachIntroOverlay';
+
+const COACH_INTRO_SEEN_KEY = 'coach_intro_seen';
 
 const { width } = Dimensions.get('window');
 const FREE_MESSAGE_LIMIT = 10;
@@ -28,20 +35,29 @@ interface Message {
   isStreaming?: boolean;
 }
 
+// CORRIGÉ : la bannière reste visible même quand le quota est atteint.
+// Avant : `if (used >= limit) return null;` cachait le bouton "Premium →"
+// exactement au moment où l'utilisateur en avait besoin.
 function QuotaBanner({ used, limit, onUpgrade }: { used: number; limit: number; onUpgrade: () => void }) {
-  if (used >= limit) return null;
-  const remaining = limit - used;
-  const progress = used / limit;
+  const remaining = Math.max(limit - used, 0);
+  const progress = Math.min(used / limit, 1);
+  const reachedLimit = used >= limit;
+
   return (
     <View style={styles.quotaBanner}>
       <View style={styles.quotaLeft}>
-        <Text style={styles.quotaText}>💬 {used} / {limit} messages utilisés</Text>
+        <View style={styles.quotaTextRow}>
+          <MessageSquareText size={13} color={Colors.text.secondary} />
+          <Text style={styles.quotaText}>
+            {reachedLimit ? `${limit} / ${limit} messages utilisés` : `${used} / ${limit} messages utilisés`}
+          </Text>
+        </View>
         <View style={styles.quotaTrack}>
           <View style={[styles.quotaFill, { width: `${progress * 100}%` }]} />
         </View>
       </View>
-      {remaining <= 3 && (
-        <TouchableOpacity onPress={onUpgrade} style={styles.upgradeBtn}>
+      {(remaining <= 3) && (
+        <TouchableOpacity onPress={onUpgrade} style={styles.upgradeBtn} activeOpacity={0.8}>
           <Text style={styles.upgradeTxt}>Premium →</Text>
         </TouchableOpacity>
       )}
@@ -69,6 +85,39 @@ function MessageBubble({ message }: { message: Message }) {
 }
 
 export default function CoachScreen() {
+  const insets = useSafeAreaInsets();
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  // ── Intro Coach IA — écran unique avant la conversation ──
+  const [introSeen, setIntroSeen] = useState<boolean | null>(null); // null = pas encore chargé
+
+  useEffect(() => {
+    AsyncStorage.getItem(COACH_INTRO_SEEN_KEY).then((value) => {
+      setIntroSeen(value === 'true');
+    });
+  }, []);
+
+  const handleContinueFromIntro = (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      AsyncStorage.setItem(COACH_INTRO_SEEN_KEY, 'true');
+    }
+    setIntroSeen(true);
+  };
+
+  useEffect(() => {
+    // Le buffer qui dégage la pill flottante ne doit exister que quand le
+    // clavier est fermé — sinon il s'ajoute à l'espace déjà pris par le
+    // clavier et pousse les messages hors de vue.
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setIsKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setIsKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   const { user, aiQuota } = useAuthStore();
   const isPremium = aiQuota?.is_premium ?? false;
 
@@ -119,12 +168,16 @@ export default function CoachScreen() {
 
   const sendMessage = async (text: string = input) => {
     const trimmed = text.trim();
-    if (!trimmed || isLoading) return;
 
+    // CORRIGÉ : vérifié même si `trimmed` est vide, pour que le bouton
+    // d'envoi (maintenant cliquable) puisse rediriger vers le paywall
+    // sans exiger que l'utilisateur tape du texte d'abord.
     if (hasReachedLimit) {
       router.push('/paywall');
       return;
     }
+
+    if (!trimmed || isLoading) return;
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: trimmed };
     const loadingId = (Date.now() + 1).toString();
@@ -203,37 +256,70 @@ export default function CoachScreen() {
       setIsLoading(false);
       scrollToBottom();
     }
-      
+
   };
+
+  // Attente du chargement AsyncStorage — évite un flash de l'intro
+  // avant qu'on sache si elle a déjà été vue
+  if (introSeen === null) {
+    return (
+      <SafeScreen edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color={Colors.brand.gold} />
+        </View>
+      </SafeScreen>
+    );
+  }
+
+  if (!introSeen) {
+    return (
+      <SafeScreen edges={['top']}>
+        <CoachIntroOverlay onContinue={handleContinueFromIntro} />
+      </SafeScreen>
+    );
+  }
 
   if (loadingHistory) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color={Colors.brand.gold} />
-        <Text style={styles.loadingTxt}>Chargement de la conversation...</Text>
-      </View>
+      <SafeScreen edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color={Colors.brand.gold} />
+          <Text style={styles.loadingTxt}>Chargement de la conversation...</Text>
+        </View>
+      </SafeScreen>
     );
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
+    <SafeScreen edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
       <View style={styles.header}>
         <View style={styles.headerAvatar}>
           <Text style={styles.headerAvatarTxt}>PJ</Text>
         </View>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.headerName}>Prince Johann</Text>
           <View style={styles.onlineRow}>
             <View style={styles.onlineDot} />
             <Text style={styles.onlineTxt}>Coach IA · Basé sur Le Code Masculin</Text>
           </View>
         </View>
+        <TouchableOpacity
+          style={styles.communityBtn}
+          onPress={() => router.push('/communaute')}
+          activeOpacity={0.8}
+        >
+          <Users size={20} color={Colors.brand.gold} />
+        </TouchableOpacity>
       </View>
 
+      {/* CORRIGÉ : la bannière s'affiche aussi quand isPremium est faux,
+          peu importe si la limite est atteinte — c'était déjà correct ici,
+          le bug était uniquement dans QuotaBanner lui-même (voir ci-dessus) */}
       {!isPremium && (
         <QuotaBanner
           used={localUsed}
@@ -274,10 +360,14 @@ export default function CoachScreen() {
           maxLength={2000}
           editable={!hasReachedLimit && !isLoading}
         />
+        {/* CORRIGÉ : le bouton reste cliquable quand hasReachedLimit est vrai,
+            pour que son onPress déclenche la redirection vers /paywall dans
+            sendMessage(). Avant, `disabled` bloquait cet appel. Il reste
+            désactivé pendant le chargement (isLoading), qui n'a pas ce problème. */}
         <TouchableOpacity
-          style={[styles.sendBtn, (!input.trim() || hasReachedLimit || isLoading) && styles.sendBtnDisabled]}
+          style={[styles.sendBtn, (isLoading || (!input.trim() && !hasReachedLimit)) && styles.sendBtnDisabled]}
           onPress={() => sendMessage()}
-          disabled={!input.trim() || hasReachedLimit || isLoading}
+          disabled={isLoading || (!input.trim() && !hasReachedLimit)}
           activeOpacity={0.8}
         >
           {isLoading
@@ -285,7 +375,14 @@ export default function CoachScreen() {
             : <Text style={styles.sendIcon}>→</Text>}
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+      {/* Buffer distinct de l'inputArea : dégage la pill flottante quand le
+          clavier est fermé. Disparaît quand le clavier est ouvert pour ne
+          pas ajouter d'espace vide inutile au-dessus du clavier. */}
+      {!isKeyboardVisible && (
+        <View style={{ height: 68 + 16 + insets.bottom, backgroundColor: Colors.background.primary }} />
+      )}
+      </KeyboardAvoidingView>
+    </SafeScreen>
   );
 }
 
@@ -293,7 +390,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background.primary },
   loadingContainer: { flex: 1, backgroundColor: Colors.background.primary, alignItems: 'center', justifyContent: 'center', gap: Spacing.base },
   loadingTxt: { ...Typography.body, color: Colors.text.muted },
-  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingHorizontal: Spacing.xl, paddingTop: 56, paddingBottom: Spacing.base, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
+  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: Spacing.base, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
+  communityBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.background.tertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border.default,
+  },
   headerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.brand.gold, alignItems: 'center', justifyContent: 'center' },
   headerAvatarTxt: { ...Typography.label, color: Colors.text.inverse, letterSpacing: 1 },
   headerName: { ...Typography.h4, color: Colors.text.primary },
@@ -302,7 +409,8 @@ const styles = StyleSheet.create({
   onlineTxt: { ...Typography.caption, color: Colors.text.secondary },
   quotaBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.xl, paddingVertical: Spacing.sm, backgroundColor: Colors.background.secondary, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
   quotaLeft: { flex: 1 },
-  quotaText: { ...Typography.caption, color: Colors.text.secondary, marginBottom: 4 },
+  quotaTextRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
+  quotaText: { ...Typography.caption, color: Colors.text.secondary },
   quotaTrack: { height: 3, backgroundColor: Colors.border.default, borderRadius: 2, overflow: 'hidden' },
   quotaFill: { height: 3, backgroundColor: Colors.brand.gold, borderRadius: 2 },
   upgradeBtn: { marginLeft: Spacing.md, paddingHorizontal: Spacing.md, paddingVertical: 4, backgroundColor: Colors.brand.gold, borderRadius: Radius.full },

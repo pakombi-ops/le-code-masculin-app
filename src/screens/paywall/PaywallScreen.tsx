@@ -1,153 +1,440 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Alert,
+  TouchableOpacity, ActivityIndicator, Alert, Linking, Image,
 } from 'react-native';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import * as ExpoLinking from 'expo-linking';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { X, Sparkles, Check } from 'lucide-react-native';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../theme';
+import { SafeScreen } from '../../components/layout/SafeScreen';
+import { supabase } from '../../services/supabase';
+import { useAuthStore } from '../../store/authStore';
+import { startAppCheckout } from '../../services/appCheckout';
+
+const GENERIC_CHECKOUT_ERROR = "Impossible de démarrer l'essai pour le moment. Réessaie dans un instant.";
 
 /**
- * SCREEN — Paywall
- * Mode démo tant que RevenueCat n'est pas configuré.
- * Remplace les DEMO_PLANS par getOfferings() une fois RevenueCat prêt.
+ * SCREEN — PaywallScreen (src/screens/paywall/PaywallScreen.tsx)
+ * Structure inspirée de Moonly : hero plein écran, grille de bénéfices,
+ * bandeau de preuve sociale, carrousel de témoignages avec photos, CTA collant.
+ *
+ * CTA principal : démarre l'essai gratuit directement dans l'app (checkout
+ * Stripe ouvert dans un navigateur intégré, retour via deep link). Aucun
+ * achat in-app natif — reste un paiement web classique, juste rapatrié
+ * dans l'app pour l'expérience utilisateur.
+ *
+ * Deux parcours annexes conservés :
+ *   1. Déjà acheté sur le site → relier le compte via POST /api/link-account
+ *      (jeton Supabase : le serveur cherche l'achat avec l'email confirmé du compte)
+ *   2. Préférence pour le site → lien secondaire discret
+ *
+ * Photos requises dans assets/testimonials/ : nicolas.jpg, yannick.jpg, florent.jpg
  */
 
-const DEMO_PLANS = [
-  { id: 'annual', label: 'PLAN ANNUEL', price: '99 €', period: '/an', monthly: '8,25 €/mois', popular: true },
-  { id: 'monthly', label: 'PLAN MENSUEL', price: '14,90 €', period: '/mois', monthly: null, popular: false },
+const WEBSITE_URL = 'https://pilierconscient.com/le-code-masculin-redeviens-lhomme-que-tu-sais-etre/';
+
+const FEATURES = [
+  'Coaching IA illimité',
+  '12 Piliers complets',
+  '52 semaines de programme',
+  'Communauté des Hommes',
+  'Journal stoïcien',
+  'Tracker de progression',
+  'Défis hebdomadaires',
+  'Bibliothèque de ressources',
 ];
 
-const BENEFITS = [
-  '💬  Coaching illimité avec Prince Johann IA',
-  '📚  Les 12 piliers et 52 semaines débloqués',
-  '📥  Téléchargements hors-ligne inclus',
-  '🔥  Suivi de progression et streak',
+const STATS = [
+  { value: '65 200', label: 'HOMMES\nENGAGÉS' },
+  { value: '590', label: 'AVIS' },
+  { value: '12', label: 'PILIERS' },
 ];
+
+const TESTIMONIALS = [
+  {
+    name: 'Nicolas M.R.',
+    location: 'France',
+    quote: "Le Code Masculin m'a donné une structure claire là où j'improvisais depuis des années.",
+    photo: require('../../../assets/testimonials/nicolas.jpg'),
+  },
+  {
+    name: 'Yannick A.F.',
+    location: 'Belgique',
+    quote: "Ce qui change tout, c'est le suivi quotidien. Je ne me contente plus de savoir — je fais.",
+    photo: require('../../../assets/testimonials/yannick.jpg'),
+  },
+  {
+    name: 'Florent Dessaint',
+    location: 'Québec',
+    quote: "Un programme direct, sans discours creux. Chaque pilier m'a forcé à regarder ce que j'évitais.",
+    photo: require('../../../assets/testimonials/florent.jpg'),
+  },
+];
+
+type ViewMode = 'main' | 'link';
+type PlanId = 'monthly' | 'annual';
 
 export default function PaywallScreen() {
-  const [selected, setSelected] = useState('annual');
-  const [isPurchasing, setIsPurchasing] = useState(false);
+  const insets = useSafeAreaInsets();
+  const [mode, setMode] = useState<ViewMode>('main');
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>('annual');
+  const [isChecking, setIsChecking] = useState(false);
+  const [isStartingTrial, setIsStartingTrial] = useState(false);
+  const authUser = useAuthStore((s) => s.user);
 
-  const handlePurchase = () => {
-    Alert.alert(
-      '🔜 Paiements bientôt disponibles',
-      'Configure ton compte RevenueCat et Google Play Console pour activer les paiements réels.',
-      [{ text: 'OK' }]
-    );
+  const handleOpenWebsite = () => {
+    Linking.openURL(WEBSITE_URL);
   };
 
-  const handleRestore = () => {
-    Alert.alert('Restaurer', 'Fonctionnalité disponible après configuration RevenueCat.');
+  const goToLogin = () => router.replace('/(auth)/login');
+
+  const handleStartTrial = async () => {
+    if (isStartingTrial) return;
+
+    setIsStartingTrial(true);
+    try {
+      const redirectUrl = ExpoLinking.createURL('checkout-return');
+
+      const checkout = await startAppCheckout(
+        { plan: selectedPlan, prenom: authUser?.prenom ?? '', redirectUrl },
+        { getSession: () => supabase.auth.getSession() }
+      );
+
+      if (checkout.kind === 'no_session' || checkout.kind === 'unauthorized') {
+        Alert.alert('Session expirée', 'Session expirée, reconnecte-toi.', [
+          { text: 'Se reconnecter', onPress: goToLogin },
+        ]);
+        return;
+      }
+      if (checkout.kind === 'bad_request') {
+        Alert.alert('Erreur', checkout.message ?? GENERIC_CHECKOUT_ERROR);
+        return;
+      }
+      if (checkout.kind !== 'ok') {
+        Alert.alert('Erreur', GENERIC_CHECKOUT_ERROR);
+        return;
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(checkout.url, redirectUrl);
+
+      if (result.type === 'success' && result.url.includes('status=success')) {
+        // On n'accorde rien localement : on relit l'état côté serveur.
+        const { user, checkEntitlement } = useAuthStore.getState();
+        if (user?.id) await checkEntitlement(user.id);
+        const active = useAuthStore.getState().entitlement.active;
+
+        Alert.alert(
+          active ? 'Accès activé 🎉' : 'Paiement reçu',
+          active
+            ? 'Ton accès premium est actif.'
+            : "Ton accès premium s'active dans les prochaines minutes. Reviens sur cet écran si besoin.",
+          [{ text: 'Continuer', onPress: () => router.back() }]
+        );
+      }
+      // 'cancel', 'dismiss', ou retour avec status=cancelled : l'utilisateur a
+      // fermé/annulé, on ne fait rien de plus
+    } catch (err) {
+      Alert.alert('Erreur de connexion', 'Vérifie ta connexion et réessaie.');
+    } finally {
+      setIsStartingTrial(false);
+    }
+  };
+
+  const handleCheckEntitlement = async () => {
+    setIsChecking(true);
+    try {
+      const result = await useAuthStore.getState().linkPurchaseAccount();
+      const forEmail = 'email' in result && result.email ? ` pour ${result.email}` : '';
+
+      switch (result.kind) {
+        case 'linked':
+          Alert.alert('Compte relié', 'Ton abonnement est maintenant actif.', [
+            { text: 'Continuer', onPress: () => router.back() },
+          ]);
+          break;
+        case 'no_customer':
+          Alert.alert(
+            'Aucun achat trouvé',
+            `Aucun achat n'est associé à ton compte${forEmail}. Si tu as payé avec une autre adresse email, contacte le support depuis la page d'activation du site.`
+          );
+          break;
+        case 'no_active_subscription':
+          Alert.alert(
+            'Abonnement inactif',
+            `Un achat existe${forEmail}, mais aucun abonnement actif n'y est associé.`
+          );
+          break;
+        case 'email_not_confirmed':
+          Alert.alert('Email non confirmé', "Confirme d'abord l'adresse email de ton compte, puis réessaie.");
+          break;
+        case 'no_session':
+        case 'unauthorized':
+          Alert.alert('Session expirée', 'Session expirée, reconnecte-toi.', [
+            { text: 'Se reconnecter', onPress: goToLogin },
+          ]);
+          break;
+        default:
+          Alert.alert('Erreur de vérification', 'Vérifie ta connexion et réessaie dans un instant.');
+      }
+    } finally {
+      setIsChecking(false);
+    }
   };
 
   return (
-    <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+    <SafeScreen edges={['top']} backgroundColor={Colors.brand.navy}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 140 }}>
 
-        <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
-          <Text style={styles.closeTxt}>←</Text>
-        </TouchableOpacity>
+        {/* HERO */}
+        <View style={styles.hero}>
+          <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
+            <X size={22} color={Colors.text.inverse} />
+          </TouchableOpacity>
 
-        <View style={styles.header}>
-          <Text style={styles.crown}>👑</Text>
-          <Text style={styles.title}>Continue avec Prince Johann</Text>
-          <Text style={styles.subtitle}>
-            Tu as utilisé tes 10 messages offerts.{'\n'}
-            La transformation continue à chaque conversation.
+          <View style={styles.heroIconWrap}>
+            <Sparkles size={40} color={Colors.brand.gold} />
+          </View>
+
+          <View style={styles.logoRow}>
+            <Text style={styles.logoTxt}>Le Code Masculin</Text>
+            <View style={styles.plusBadge}>
+              <Text style={styles.plusBadgeTxt}>PREMIUM</Text>
+            </View>
+          </View>
+
+          <Text style={styles.heroTitle}>Ta transformation{'\n'}continue</Text>
+          <Text style={styles.heroSubtitle}>
+            Coaching illimité, les 12 piliers débloqués, et le suivi qui fait tenir tes engagements.
           </Text>
         </View>
 
-        <View style={styles.benefits}>
-          {BENEFITS.map((b, i) => (
-            <View key={i} style={styles.benefitRow}>
-              <Text style={styles.benefitTxt}>{b}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.plans}>
-          {DEMO_PLANS.map(plan => (
-            <TouchableOpacity
-              key={plan.id}
-              style={[styles.planCard, selected === plan.id && styles.planCardSelected]}
-              onPress={() => setSelected(plan.id)}
-            >
-              {plan.popular && (
-                <View style={styles.popularBadge}>
-                  <Text style={styles.popularTxt}>⭐ POPULAIRE</Text>
+        {mode === 'main' && (
+          <>
+            {/* PRICING — sélectionnable, détermine le plan de l'essai */}
+            <View style={styles.pricingSection}>
+              <TouchableOpacity
+                style={[styles.priceCard, selectedPlan === 'monthly' && styles.priceCardSelected]}
+                onPress={() => setSelectedPlan('monthly')}
+                activeOpacity={0.85}
+              >
+                {selectedPlan === 'monthly' && (
+                  <View style={styles.selectedCheck}>
+                    <Check size={12} color={Colors.brand.navy} strokeWidth={3} />
+                  </View>
+                )}
+                <Text style={styles.priceLabel}>MENSUEL</Text>
+                <Text style={styles.priceValue}>29 €<Text style={styles.pricePeriod}>/mois</Text></Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.priceCard, styles.priceCardHighlight, selectedPlan === 'annual' && styles.priceCardSelected]}
+                onPress={() => setSelectedPlan('annual')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.priceBadge}>
+                  <Text style={styles.priceBadgeTxt}>MEILLEURE VALEUR</Text>
                 </View>
-              )}
-              <Text style={styles.planLabel}>{plan.label}</Text>
-              <Text style={styles.planPrice}>
-                {plan.price}<Text style={styles.planPeriod}>{plan.period}</Text>
-              </Text>
-              {plan.monthly && (
-                <Text style={styles.planMonthly}>≈ {plan.monthly}</Text>
+                {selectedPlan === 'annual' && (
+                  <View style={styles.selectedCheck}>
+                    <Check size={12} color={Colors.brand.navy} strokeWidth={3} />
+                  </View>
+                )}
+                <Text style={styles.priceLabel}>ANNUEL</Text>
+                <Text style={styles.priceValue}>297 €<Text style={styles.pricePeriod}>/an</Text></Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* FEATURES */}
+            <View style={styles.featuresBox}>
+              <Text style={styles.sectionTitle}>Ce qui est inclus</Text>
+              <View style={styles.featuresGrid}>
+                {FEATURES.map((f, i) => (
+                  <View key={i} style={styles.featurePill}>
+                    <Text style={styles.featurePillTxt}>{f}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* STATS */}
+            <View style={styles.statsRow}>
+              {STATS.map((s, i) => (
+                <View key={i} style={styles.statItem}>
+                  <Text style={styles.statValue}>{s.value}</Text>
+                  <Text style={styles.statLabel}>{s.label}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* TESTIMONIALS */}
+            <View style={styles.testimonialsBox}>
+              <Text style={styles.sectionTitle}>Ils ont fait le pas</Text>
+              {TESTIMONIALS.map((t, i) => (
+                <View key={i} style={styles.testimonialCard}>
+                  <Text style={styles.testimonialQuote}>"{t.quote}"</Text>
+                  <View style={styles.testimonialFooter}>
+                    <Image source={t.photo} style={styles.testimonialPhoto} />
+                    <View>
+                      <Text style={styles.testimonialAuthor}>{t.name}</Text>
+                      <Text style={styles.testimonialLocation}>{t.location}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <TouchableOpacity onPress={() => setMode('link')} style={styles.linkBtn}>
+              <Text style={styles.linkTxt}>J'ai déjà un compte, relier mon abonnement</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleOpenWebsite} style={styles.linkBtn}>
+              <Text style={styles.linkTxtMuted}>Ou continuer sur le site</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {mode === 'link' && (
+          <View style={styles.linkArea}>
+            <Text style={styles.linkTitle}>Relier ton abonnement</Text>
+            <Text style={styles.linkSubtitle}>
+              {authUser?.email
+                ? `On cherche ton achat sur le site avec l'adresse de ton compte : ${authUser.email}.`
+                : "On cherche ton achat sur le site avec l'adresse email de ton compte."}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.ctaBtnInline, isChecking && styles.ctaBtnDisabled]}
+              onPress={handleCheckEntitlement}
+              disabled={isChecking}
+              activeOpacity={0.85}
+            >
+              {isChecking ? (
+                <ActivityIndicator color={Colors.text.inverse} />
+              ) : (
+                <Text style={styles.ctaTxt}>Vérifier mon abonnement</Text>
               )}
             </TouchableOpacity>
-          ))}
-        </View>
 
-        <View style={styles.ctaArea}>
-          <TouchableOpacity
-            style={styles.ctaBtn}
-            onPress={handlePurchase}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.ctaTxt}>Essayer 7 jours GRATUIT →</Text>
-          </TouchableOpacity>
-          <Text style={styles.ctaNote}>Puis facturation automatique · Annulable à tout moment</Text>
-          <TouchableOpacity onPress={handleRestore} style={styles.restoreBtn}>
-            <Text style={styles.restoreTxt}>Restaurer mes achats</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity onPress={() => setMode('main')} style={styles.linkBtn}>
+              <Text style={styles.linkTxt}>← Retour</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-        <View style={styles.testimonial}>
-          <Text style={styles.testimonialTxt}>
-            "En 3 semaines avec Prince Johann IA, j'ai enfin tenu mes engagements."
-          </Text>
-          <Text style={styles.testimonialAuthor}>— Thomas, 32 ans, Lyon</Text>
-        </View>
-
-        <Text style={styles.legal}>
-          En continuant, tu acceptes nos Conditions d'utilisation.
-          L'abonnement se renouvelle automatiquement sauf annulation 24h avant la fin de la période.
-        </Text>
-
-        <View style={{ height: 40 }} />
       </ScrollView>
-    </View>
+
+      {/* CTA COLLANT EN BAS */}
+      {mode === 'main' && (
+        <View style={[styles.stickyFooter, { paddingBottom: Spacing.xl + insets.bottom }]}>
+          <TouchableOpacity
+            style={[styles.ctaBtn, isStartingTrial && styles.ctaBtnDisabled]}
+            onPress={handleStartTrial}
+            activeOpacity={0.9}
+            disabled={isStartingTrial}
+          >
+            {isStartingTrial ? (
+              <ActivityIndicator color={Colors.text.inverse} />
+            ) : (
+              <Text style={styles.ctaTxt}>Démarrer mon essai gratuit →</Text>
+            )}
+          </TouchableOpacity>
+          <Text style={styles.ctaNote}>Carte requise · Aucun débit avant la fin de l'essai</Text>
+        </View>
+      )}
+    </SafeScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background.primary },
-  closeBtn: { position: 'absolute', top: 56, left: Spacing.xl, zIndex: 10, padding: Spacing.sm },
-  closeTxt: { fontSize: 24, color: Colors.brand.gold },
-  header: { alignItems: 'center', paddingTop: 100, paddingHorizontal: Spacing.xl, marginBottom: Spacing['2xl'] },
-  crown: { fontSize: 48, marginBottom: Spacing.lg },
-  title: { ...Typography.h2, color: Colors.text.primary, textAlign: 'center', marginBottom: Spacing.sm },
-  subtitle: { ...Typography.body, color: Colors.text.secondary, textAlign: 'center', lineHeight: 24 },
-  benefits: { paddingHorizontal: Spacing.xl, marginBottom: Spacing['2xl'], gap: Spacing.sm },
-  benefitRow: { flexDirection: 'row', alignItems: 'center' },
-  benefitTxt: { ...Typography.body, color: Colors.text.primary, lineHeight: 28 },
-  plans: { paddingHorizontal: Spacing.xl, gap: Spacing.sm, marginBottom: Spacing.xl },
-  planCard: { backgroundColor: Colors.background.secondary, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border.default, padding: Spacing.xl, alignItems: 'center', position: 'relative' },
-  planCardSelected: { borderColor: Colors.brand.gold, borderWidth: 2, ...Shadow.gold },
-  popularBadge: { position: 'absolute', top: -12, backgroundColor: Colors.brand.gold, borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: 3 },
-  popularTxt: { ...Typography.caption, color: Colors.text.inverse, fontWeight: '700' },
-  planLabel: { ...Typography.label, color: Colors.text.muted, marginBottom: Spacing.sm },
-  planPrice: { ...Typography.number, color: Colors.text.primary },
-  planPeriod: { ...Typography.h3, color: Colors.text.secondary },
-  planMonthly: { ...Typography.bodySmall, color: Colors.status.success, marginTop: Spacing.xs },
-  ctaArea: { paddingHorizontal: Spacing.xl, alignItems: 'center' },
-  ctaBtn: { backgroundColor: Colors.brand.gold, borderRadius: Radius.lg, paddingVertical: Spacing.base + 2, alignItems: 'center', width: '100%', marginBottom: Spacing.sm, ...Shadow.gold },
+
+  hero: {
+    backgroundColor: Colors.brand.navy,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing['2xl'],
+    paddingHorizontal: Spacing.xl,
+  },
+  closeBtn: { alignSelf: 'flex-start', padding: Spacing.sm, marginBottom: Spacing.lg },
+  heroIconWrap: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: 'rgba(200, 150, 60, 0.15)',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
+  logoRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.md },
+  logoTxt: { ...Typography.label, color: Colors.text.inverse },
+  plusBadge: { backgroundColor: Colors.brand.gold, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  plusBadgeTxt: { fontSize: 10, fontWeight: '700', color: Colors.brand.navy, letterSpacing: 0.5 },
+  heroTitle: {
+    ...Typography.h1,
+    fontSize: 34,
+    lineHeight: 40,
+    letterSpacing: -0.5,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    marginBottom: Spacing.md,
+  },
+  heroSubtitle: { ...Typography.body, color: 'rgba(245, 240, 232, 0.8)', lineHeight: 22 },
+
+  pricingSection: { flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.xl, marginTop: Spacing.xl },
+  priceCard: {
+    flex: 1, backgroundColor: Colors.background.secondary, borderRadius: Radius.lg,
+    borderWidth: 1, borderColor: Colors.border.default, padding: Spacing.lg,
+  },
+  priceCardHighlight: { borderColor: Colors.brand.gold, borderWidth: 2 },
+  priceCardSelected: { borderColor: Colors.brand.gold, borderWidth: 2, backgroundColor: Colors.background.tertiary },
+  selectedCheck: {
+    position: 'absolute', top: Spacing.sm, right: Spacing.sm,
+    width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.brand.gold,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  priceBadge: { position: 'absolute', top: -10, left: Spacing.md, backgroundColor: Colors.brand.gold, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  priceBadgeTxt: { fontSize: 9, fontWeight: '700', color: Colors.brand.navy },
+  priceLabel: { ...Typography.caption, color: Colors.text.muted, marginBottom: Spacing.xs },
+  priceValue: { ...Typography.h3, color: Colors.text.primary },
+  pricePeriod: { ...Typography.bodySmall, color: Colors.text.secondary },
+
+  sectionTitle: { ...Typography.h4, color: Colors.text.primary, marginBottom: Spacing.md },
+  featuresBox: { paddingHorizontal: Spacing.xl, marginTop: Spacing['2xl'] },
+  featuresGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  featurePill: { backgroundColor: Colors.background.secondary, borderWidth: 1, borderColor: Colors.border.default, borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  featurePillTxt: { ...Typography.bodySmall, color: Colors.text.secondary },
+
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: Colors.background.secondary, marginHorizontal: Spacing.xl, marginTop: Spacing['2xl'], borderRadius: Radius.lg, paddingVertical: Spacing.lg, borderWidth: 1, borderColor: Colors.border.default },
+  statItem: { alignItems: 'center' },
+  statValue: { ...Typography.h3, color: Colors.brand.gold },
+  statLabel: { ...Typography.caption, color: Colors.text.muted, textAlign: 'center', marginTop: 4, lineHeight: 14 },
+
+  testimonialsBox: { paddingHorizontal: Spacing.xl, marginTop: Spacing['2xl'] },
+  testimonialCard: { backgroundColor: Colors.background.secondary, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border.default, padding: Spacing.lg, marginBottom: Spacing.sm },
+  testimonialQuote: { ...Typography.body, color: Colors.text.primary, fontStyle: 'italic', marginBottom: Spacing.md, lineHeight: 22 },
+  testimonialFooter: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  testimonialPhoto: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, borderColor: Colors.brand.gold },
+  testimonialAuthor: { ...Typography.bodySmall, color: Colors.text.primary, fontWeight: '600' },
+  testimonialLocation: { ...Typography.caption, color: Colors.text.muted },
+
+  linkBtn: { paddingVertical: Spacing.md, alignItems: 'center', marginTop: Spacing.md },
+  linkTxt: { ...Typography.bodySmall, color: Colors.text.muted, textDecorationLine: 'underline' },
+  linkTxtMuted: { ...Typography.caption, color: Colors.text.muted },
+
+  linkArea: { paddingHorizontal: Spacing.xl, marginTop: Spacing['2xl'] },
+  linkTitle: { ...Typography.h3, color: Colors.text.primary, marginBottom: Spacing.xs },
+  linkSubtitle: { ...Typography.body, color: Colors.text.secondary, marginBottom: Spacing.lg, lineHeight: 22 },
+  input: {
+    backgroundColor: Colors.background.secondary, borderRadius: Radius.lg, borderWidth: 1,
+    borderColor: Colors.border.default, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.base,
+    color: Colors.text.primary, ...Typography.body, marginBottom: Spacing.lg,
+  },
+  ctaBtnInline: { backgroundColor: Colors.brand.gold, borderRadius: Radius.lg, paddingVertical: Spacing.base + 2, alignItems: 'center', ...Shadow.gold },
+  ctaBtnDisabled: { opacity: 0.6 },
+
+  stickyFooter: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: Colors.background.primary, borderTopWidth: 1, borderTopColor: Colors.border.subtle,
+    paddingHorizontal: Spacing.xl, paddingTop: Spacing.md, paddingBottom: Spacing.xl,
+  },
+  ctaBtn: { backgroundColor: Colors.brand.gold, borderRadius: Radius.lg, paddingVertical: Spacing.base + 2, alignItems: 'center', ...Shadow.gold },
   ctaTxt: { ...Typography.button, color: Colors.text.inverse },
-  ctaNote: { ...Typography.caption, color: Colors.text.muted, textAlign: 'center', marginBottom: Spacing.base },
-  restoreBtn: { paddingVertical: Spacing.sm },
-  restoreTxt: { ...Typography.bodySmall, color: Colors.text.muted, textDecorationLine: 'underline' },
-  testimonial: { marginHorizontal: Spacing.xl, marginTop: Spacing.xl, borderLeftWidth: 2, borderLeftColor: Colors.brand.gold, paddingLeft: Spacing.md },
-  testimonialTxt: { ...Typography.body, color: Colors.text.secondary, fontStyle: 'italic' },
-  testimonialAuthor: { ...Typography.caption, color: Colors.text.muted, marginTop: Spacing.xs },
-  legal: { ...Typography.caption, color: Colors.text.muted, textAlign: 'center', paddingHorizontal: Spacing.xl, marginTop: Spacing.xl, lineHeight: 18 },
+  ctaNote: { ...Typography.caption, color: Colors.text.muted, textAlign: 'center', marginTop: Spacing.sm },
 });

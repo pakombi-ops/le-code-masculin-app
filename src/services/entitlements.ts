@@ -12,7 +12,7 @@
 
 export const ENTITLEMENTS_BACKEND_URL = 'https://lcm-backend-production-efd1.up.railway.app';
 
-type SessionLike = { access_token?: string | null } | null;
+type SessionLike = { access_token?: string | null; user?: { email?: string | null } | null } | null;
 
 export interface BackendAuthDeps {
   /** Typiquement : () => supabase.auth.getSession() */
@@ -68,6 +68,37 @@ export async function linkAccount(email: string, deps: BackendAuthDeps): Promise
   if (response.status === 401) return { linked: false, reason: 'unauthorized' };
   if (!response.ok || !body || typeof body.linked !== 'boolean') return { linked: false, reason: 'server_error' };
   return body;
+}
+
+/** Résultat présenté par le Paywall (« J'ai déjà acheté »). */
+export type LinkPurchaseResult =
+  | { kind: 'linked'; email: string | null }
+  | { kind: 'no_customer'; email: string | null }
+  | { kind: 'no_active_subscription'; email: string | null }
+  | { kind: 'email_not_confirmed' }
+  | { kind: 'no_session' }
+  | { kind: 'unauthorized' }
+  | { kind: 'error' };
+
+/**
+ * Relie l'achat au compte connecté, sans saisie : envoie l'email DU COMPTE
+ * (lu dans la session), le seul que le serveur accepte (sinon email_mismatch).
+ */
+export async function linkCurrentAccount(deps: BackendAuthDeps): Promise<LinkPurchaseResult> {
+  const { data, error } = await deps.getSession();
+  const email = data?.session?.user?.email ?? null;
+  if (error || !data?.session?.access_token || !email) return { kind: 'no_session' };
+
+  const result = await linkAccount(email, deps);
+  if (result.linked) return { kind: 'linked', email };
+  switch (result.reason) {
+    case 'no_customer': return { kind: 'no_customer', email };
+    case 'no_active_subscription': return { kind: 'no_active_subscription', email };
+    case 'email_not_verified': return { kind: 'email_not_confirmed' };
+    case 'no_session': return { kind: 'no_session' };
+    case 'unauthorized': return { kind: 'unauthorized' };
+    default: return { kind: 'error' };
+  }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { sendCoachMessage, buildCoachHistory, COACH_CHAT_URL, MAX_HISTORY_MESSAGES } from '../coachChat';
-import { linkAccount, checkEntitlementStatus, ENTITLEMENTS_BACKEND_URL } from '../entitlements';
+import { linkAccount, linkCurrentAccount, checkEntitlementStatus, ENTITLEMENTS_BACKEND_URL } from '../entitlements';
 
 const TOKEN = 'jeton-supabase';
 const sessionOk = () => Promise.resolve({ data: { session: { access_token: TOKEN } }, error: null });
@@ -135,5 +135,40 @@ describe('checkEntitlementStatus (format a49b96c)', () => {
     const fetchFn = jest.fn();
     await expect(checkEntitlementStatus('u1', { getSession: noSession, fetchFn })).rejects.toThrow('no_session');
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('linkCurrentAccount (Paywall « J’ai déjà acheté »)', () => {
+  const sessionWithEmail = (email: string | null) => () =>
+    Promise.resolve({ data: { session: { access_token: TOKEN, user: { email } } }, error: null });
+
+  it("envoie l'email DU COMPTE (lu dans la session) avec le jeton", async () => {
+    const fetchFn = jest.fn().mockResolvedValue(jsonResponse(200, { linked: true, status: 'active' }));
+    expect(await linkCurrentAccount({ getSession: sessionWithEmail('compte@exemple.fr'), fetchFn })).toEqual({
+      kind: 'linked',
+      email: 'compte@exemple.fr',
+    });
+    const [, init] = fetchFn.mock.calls[0];
+    expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.parse(init.body)).toEqual({ email: 'compte@exemple.fr' });
+  });
+
+  it("sans session ou sans email : no_session, sans appel", async () => {
+    const fetchFn = jest.fn();
+    expect(await linkCurrentAccount({ getSession: noSession, fetchFn })).toEqual({ kind: 'no_session' });
+    expect(await linkCurrentAccount({ getSession: sessionWithEmail(null), fetchFn })).toEqual({ kind: 'no_session' });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [200, { linked: false, reason: 'no_customer' }, { kind: 'no_customer', email: 'c@e.fr' }],
+    [200, { linked: false, reason: 'no_active_subscription' }, { kind: 'no_active_subscription', email: 'c@e.fr' }],
+    [200, { linked: false, reason: 'email_not_verified' }, { kind: 'email_not_confirmed' }],
+    [200, { linked: false, reason: 'email_mismatch' }, { kind: 'error' }],
+    [401, { error: 'Session invalide.' }, { kind: 'unauthorized' }],
+    [500, { error: 'x' }, { kind: 'error' }],
+  ])('statut %i %j', async (status, body, expected) => {
+    const fetchFn = jest.fn().mockResolvedValue(jsonResponse(status, body));
+    expect(await linkCurrentAccount({ getSession: sessionWithEmail('c@e.fr'), fetchFn })).toEqual(expected);
   });
 });
