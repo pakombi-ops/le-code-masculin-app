@@ -93,6 +93,15 @@ export default function ProfilScreen() {
       Alert.alert('Introuvable', "Aucun achat trouvé avec cet email. Vérifie l'orthographe ou achète un plan sur pilierconscient.com.");
     } else if (result.reason === 'no_active_subscription') {
       Alert.alert("Pas d'abonnement actif", "Cet email existe mais n'a pas d'abonnement actif actuellement.");
+    } else if (result.reason === 'email_mismatch') {
+      Alert.alert(
+        'Email différent',
+        "Pour ta sécurité, seul l'email de ton compte peut être relié. Entre l'adresse de ton compte, ou contacte le support si tu as payé avec une autre adresse."
+      );
+    } else if (result.reason === 'email_not_verified') {
+      Alert.alert('Email non confirmé', "Confirme d'abord l'adresse email de ton compte, puis réessaie.");
+    } else if (result.reason === 'no_session' || result.reason === 'unauthorized') {
+      Alert.alert('Session expirée', 'Reconnecte-toi, puis réessaie.');
     } else {
       Alert.alert('Erreur', 'Impossible de vérifier ton achat pour le moment.');
     }

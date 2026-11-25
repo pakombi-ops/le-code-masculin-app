@@ -7,10 +7,10 @@ import {
 import { router } from 'expo-router';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { useAuthStore, selectCanUseAI, selectRemainingMessages } from '../../store/authStore';
-import { saveMessage, incrementAiMessages, getConversationHistory } from '../../services/supabase';
+import { supabase, saveMessage, getConversationHistory } from '../../services/supabase';
+import { sendCoachMessage, ServerQuota } from '../../services/coachChat';
 
 const { width } = Dimensions.get('window');
-const BACKEND_URL = 'https://lcm-backend-production-efd1.up.railway.app';
 const FREE_MESSAGE_LIMIT = 10;
 
 const SUGGESTIONS = [
@@ -135,60 +135,70 @@ export default function CoachScreen() {
     setIsLoading(true);
     scrollToBottom();
 
-    // Incrémenter le compteur local immédiatement
-    setLocalUsed(prev => prev + 1);
+    // Le serveur compte les messages : on aligne le compteur local et le store
+    // (accueil, profil) sur ce qu'il renvoie, au lieu d'incrémenter côté app.
+    const applyServerQuota = (q: { used: number | null; premium: boolean }) => {
+      if (typeof q.used === 'number') setLocalUsed(q.used);
+      useAuthStore.setState(state => ({
+        aiQuota: {
+          ...(state.aiQuota ?? { messages_used: 0, is_premium: false }),
+          ...(typeof q.used === 'number' ? { messages_used: q.used } : {}),
+          is_premium: q.premium,
+        },
+      }));
+    };
 
-// Synchroniser le store pour l'accueil et le profil
-useAuthStore.setState(state => ({
-  aiQuota: state.aiQuota
-    ? { ...state.aiQuota, messages_used: (state.aiQuota.messages_used ?? 0) + 1 }
-    : { messages_used: 1, is_premium: false },
-}));
+    const showReply = (content: string) => {
+      setMessages(prev => prev.map(m =>
+        m.id === loadingId ? { ...m, content, isStreaming: false } : m
+      ));
+    };
 
     // Sauvegarder dans Supabase en arrière-plan
     if (user?.id) {
       saveMessage(user.id, 'user', trimmed);
-      incrementAiMessages(user.id);
     }
 
     try {
-      const conversationHistory = [...messages, userMsg].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      const response = await fetch(`${BACKEND_URL}/api/chat-simple`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const result = await sendCoachMessage(
+        {
           message: trimmed,
-          conversationHistory: conversationHistory,
-        }),
-      });
+          // messages déjà échangés, sans le message en cours ni une réponse encore en attente
+          history: messages.filter((m) => !m.isStreaming),
+        },
+        { getSession: () => supabase.auth.getSession() }
+      );
 
-      if (!response.ok) throw new Error(`Erreur ${response.status}`);
-
-      const data = await response.json();
-      const replyText = data.response || "Je n'ai pas pu répondre.";
-
-      setMessages(prev => prev.map(m =>
-        m.id === loadingId
-          ? { ...m, content: replyText, isStreaming: false }
-          : m
-      ));
-
-      // Sauvegarder la réponse dans Supabase
-      if (user?.id) {
-        saveMessage(user.id, 'assistant', replyText);
+      switch (result.kind) {
+        case 'ok': {
+          if (result.quota) applyServerQuota(result.quota as ServerQuota);
+          const replyText = result.text || "Je n'ai pas pu répondre.";
+          showReply(replyText);
+          if (user?.id) {
+            saveMessage(user.id, 'assistant', replyText);
+          }
+          break;
+        }
+        case 'limit_reached':
+          applyServerQuota({ used: result.used ?? FREE_MESSAGE_LIMIT, premium: false });
+          showReply(`Tu as utilisé tes ${FREE_MESSAGE_LIMIT} messages offerts. Passe au Code complet pour continuer la conversation.`);
+          break;
+        case 'no_session':
+        case 'unauthorized':
+          showReply('Ta session a expiré. Reconnecte-toi pour continuer.');
+          break;
+        case 'rate_limited':
+          showReply('Tu envoies beaucoup de messages. Respire, et réessaie dans une minute.');
+          break;
+        case 'bad_request':
+          showReply(result.message ?? 'Message invalide.');
+          break;
+        default:
+          showReply('Une erreur est survenue. Réessaie.');
       }
-
     } catch (error) {
       console.error('Chat error:', error);
-      setMessages(prev => prev.map(m =>
-        m.id === loadingId
-          ? { ...m, content: 'Une erreur est survenue. Réessaie.', isStreaming: false }
-          : m
-      ));
+      showReply('Une erreur est survenue. Réessaie.');
     } finally {
       setIsLoading(false);
       scrollToBottom();

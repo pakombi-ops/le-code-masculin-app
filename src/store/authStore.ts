@@ -118,7 +118,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   checkEntitlement: async (userId: string) => {
     try {
-      const result = await checkEntitlementStatus(userId);
+      // Jeton Supabase obligatoire (backend a49b96c). En cas d'échec, on garde
+      // l'état précédent au lieu de verrouiller à tort un abonné.
+      const result = await checkEntitlementStatus(userId, { getSession: () => supabase.auth.getSession() });
       set({ entitlement: { active: result.active, planType: result.planType } });
     } catch (err) {
       console.error('Erreur checkEntitlement:', err);
@@ -127,7 +129,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   linkPurchaseAccount: async (email: string, userId: string) => {
     try {
-      const result = await linkAccount(email, userId);
+      // L'identité vient du jeton ; le serveur n'accepte que l'email du compte connecté.
+      const result = await linkAccount(email, { getSession: () => supabase.auth.getSession() });
       if (result.linked) {
         set({ entitlement: { active: true, planType: null } });
         await useAuthStore.getState().refreshQuota(userId);
