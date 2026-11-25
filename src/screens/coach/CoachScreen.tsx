@@ -246,6 +246,9 @@ export default function CoachScreen() {
         case 'bad_request':
           showReply(result.message ?? 'Message invalide.');
           break;
+        case 'unavailable':
+          showReply('Le coach est momentanément indisponible. Réessaie un peu plus tard.');
+          break;
         default:
           showReply('Une erreur est survenue. Réessaie.');
       }

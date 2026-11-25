@@ -13,7 +13,10 @@
  *   429                                                 trop de messages / serveur occupé
  *   401                                                 session absente ou expirée
  *   400 { error }                                       message invalide
- *   502 / 503                                           coach indisponible
+ *   502 { error: 'provider_error' }                     le fournisseur IA a échoué, y compris
+ *                                                       limite de dépense Anthropic atteinte
+ *   503 { error: 'quota_unavailable' }                  base indisponible
+ *   → 502 / 503 / 529 : « coach momentanément indisponible »
  */
 
 export const COACH_BACKEND_URL = 'https://lcm-backend-production-efd1.up.railway.app';
@@ -31,7 +34,11 @@ export type CoachChatResult =
   | { kind: 'unauthorized' }
   | { kind: 'rate_limited' }
   | { kind: 'bad_request'; message: string | null }
+  | { kind: 'unavailable' }
   | { kind: 'error' };
+
+/** Statuts où le coach lui-même est indisponible (fournisseur IA, limite de dépense, base). */
+const UNAVAILABLE_STATUSES = [502, 503, 529];
 
 type SessionLike = { access_token?: string | null } | null;
 
@@ -106,6 +113,7 @@ export async function sendCoachMessage(
   if (response.status === 400) {
     return { kind: 'bad_request', message: typeof body?.error === 'string' ? body.error : null };
   }
+  if (UNAVAILABLE_STATUSES.includes(response.status)) return { kind: 'unavailable' };
   if (!response.ok || typeof body?.response !== 'string') return { kind: 'error' };
 
   return { kind: 'ok', text: body.response, quota: readQuota(body), safety: body.safety === true };
