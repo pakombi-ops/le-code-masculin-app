@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase, getUserProfile, getUserStreak, getAiQuota, getUserProgress, markLessonCompleted } from '../services/supabase';
-import { linkAccount, checkEntitlementStatus } from '../services/entitlements';
+import { linkAccount, checkEntitlementStatus, LinkAccountResult } from '../services/entitlements';
+import { initNotifications, refreshStreakAlert, scheduleReactivationReminders } from '../services/notifications';
 
 interface UserProfile {
   id: string;
@@ -39,7 +40,7 @@ interface AuthState {
   refreshStreak: (userId: string) => Promise<void>;
   entitlement: { active: boolean; planType: string | null };
   checkEntitlement: (userId: string) => Promise<void>;
-  linkPurchaseAccount: (email: string, userId: string) => Promise<{ linked: boolean; reason?: string }>;
+  linkPurchaseAccount: () => Promise<LinkAccountResult>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -86,6 +87,15 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: true,
         isLoading: false,
       }));
+
+      // Notifications locales : initialise (citation hebdo, vérif podcast) puis
+      // recalcule l'alerte streak avec la donnée fraîchement chargée.
+      // Échec silencieux volontaire — jamais bloquant pour le reste du chargement.
+      initNotifications().catch(() => {});
+      scheduleReactivationReminders().catch(() => {});
+      if (streakRes.data) {
+        refreshStreakAlert(streakRes.data).catch(() => {});
+      }
     } catch (err) {
       console.error('Erreur loadUser:', err);
       set({ isLoading: false });
@@ -111,7 +121,10 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   refreshStreak: async (userId: string) => {
     const { data } = await getUserStreak(userId);
-    if (data) set({ streak: data });
+    if (data) {
+      set({ streak: data });
+      refreshStreakAlert(data).catch(() => {});
+    }
   },
 
   entitlement: { active: false, planType: null },
@@ -125,18 +138,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  linkPurchaseAccount: async (email: string, userId: string) => {
-    try {
-      const result = await linkAccount(email, userId);
-      if (result.linked) {
-        set({ entitlement: { active: true, planType: null } });
-        await useAuthStore.getState().refreshQuota(userId);
+  // Relie l'abonnement au compte connecté (identité lue par le serveur dans
+  // le jeton), puis relit l'accès depuis le serveur : rien n'est accordé
+  // localement.
+  linkPurchaseAccount: async () => {
+    const result = await linkAccount({ getSession: () => supabase.auth.getSession() });
+    if (result.kind === 'linked') {
+      const { user, checkEntitlement, refreshQuota } = useAuthStore.getState();
+      const { data } = await supabase.auth.getUser();
+      const userId = data?.user?.id ?? user?.id;
+      if (userId) {
+        await Promise.all([checkEntitlement(userId), refreshQuota(userId)]);
       }
-      return result;
-    } catch (err) {
-      console.error('Erreur linkPurchaseAccount:', err);
-      return { linked: false, reason: 'network_error' };
     }
+    return result;
   },
 }));
 

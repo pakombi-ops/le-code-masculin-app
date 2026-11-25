@@ -1,10 +1,13 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Dimensions } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import Svg, { Polygon, Line, Circle, Text as SvgText } from 'react-native-svg';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../theme';
 import { PILLARS, getPillarById } from '../../constants/pillars';
 import { getWeakestPillars } from '../../constants/quiz';
+import { useAuthStore } from '../../store/authStore';
+import { useOnboardingStore } from '../../store/onboardingStore';
+import { savePacteEntry, saveDiagnosticResults, recomputePillarPriority } from '../../services/supabase';
 
 const { width } = Dimensions.get('window');
 const RADAR_SIZE = width - 80;
@@ -41,6 +44,7 @@ export default function ResultatsScreen() {
   const scores: Record<number, number> = sp ? JSON.parse(sp) : {};
   const weak = getWeakestPillars(scores);
   const opacity = useRef(new Animated.Value(0)).current;
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }).start();
@@ -60,6 +64,37 @@ export default function ResultatsScreen() {
   11: "Tu te censures encore. L'homme authentique dérange.",
   12: "Tu vis pour aujourd'hui. L'héritage se construit maintenant.",
 };
+
+  const handleCta = async () => {
+    const authUser = useAuthStore.getState().user;
+
+    // Utilisateur déjà connecté (scénario 1 — compte créé via paiement site) :
+    // on sauvegarde directement, pas de passage par l'inscription qui casserait
+    // tout puisque le compte existe déjà.
+    if (authUser) {
+      setIsSaving(true);
+      try {
+        const { pacteText, reset } = useOnboardingStore.getState();
+
+        await Promise.all([
+          savePacteEntry(authUser.id, pacteText ?? ''),
+          saveDiagnosticResults(authUser.id, scores),
+        ]);
+        await recomputePillarPriority(authUser.id);
+
+        reset();
+        router.replace('/(tabs)/accueil');
+      } catch (err) {
+        console.error('Erreur sauvegarde diagnostic (utilisateur connecté) :', err);
+        setIsSaving(false);
+      }
+      return;
+    }
+
+    // Nouvel utilisateur (scénario 2 — inscription in-app) : comportement inchangé.
+    // La sauvegarde se fait après création du compte, via le listener dans app/_layout.tsx.
+    router.push({ pathname: '/(auth)/register', params: { scores: sp } });
+  };
 
   return (
     <View style={styles.container}>
@@ -98,8 +133,8 @@ export default function ResultatsScreen() {
             <Text style={styles.msgSub}>Pas par le début du livre — par toi.</Text>
           </View>
 
-          <TouchableOpacity style={styles.ctaBtn} onPress={() => router.push({ pathname: '/(auth)/register', params: { scores: sp } })} activeOpacity={0.85}>
-            <Text style={styles.ctaTxt}>Commencer mon Code  →</Text>
+          <TouchableOpacity style={styles.ctaBtn} onPress={handleCta} activeOpacity={0.85} disabled={isSaving}>
+            <Text style={styles.ctaTxt}>{isSaving ? 'Enregistrement...' : 'Commencer mon Code  →'}</Text>
           </TouchableOpacity>
           <Text style={styles.ctaNote}>Gratuit · 10 messages de coaching offerts</Text>
           <View style={{ height: 50 }} />

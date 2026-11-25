@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, TextInput, ActivityIndicator, Alert, Linking, Image,
+  TouchableOpacity, ActivityIndicator, Alert, Linking, Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -28,14 +28,13 @@ const GENERIC_CHECKOUT_ERROR = "Impossible de démarrer l'essai pour le moment. 
  *
  * Deux parcours annexes conservés :
  *   1. Déjà acheté sur le site → relier le compte via POST /api/link-account
+ *      (jeton Supabase : le serveur cherche l'achat avec l'email confirmé du compte)
  *   2. Préférence pour le site → lien secondaire discret
  *
  * Photos requises dans assets/testimonials/ : nicolas.jpg, yannick.jpg, florent.jpg
  */
 
 const WEBSITE_URL = 'https://pilierconscient.com/le-code-masculin-redeviens-lhomme-que-tu-sais-etre/';
-const RAILWAY_BASE = 'https://lcm-backend-production-efd1.up.railway.app';
-const LINK_ACCOUNT_URL = `${RAILWAY_BASE}/api/link-account`;
 
 const FEATURES = [
   'Coaching IA illimité',
@@ -82,7 +81,6 @@ export default function PaywallScreen() {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ViewMode>('main');
   const [selectedPlan, setSelectedPlan] = useState<PlanId>('annual');
-  const [email, setEmail] = useState('');
   const [isChecking, setIsChecking] = useState(false);
   const [isStartingTrial, setIsStartingTrial] = useState(false);
   const authUser = useAuthStore((s) => s.user);
@@ -91,10 +89,10 @@ export default function PaywallScreen() {
     Linking.openURL(WEBSITE_URL);
   };
 
+  const goToLogin = () => router.replace('/(auth)/login');
+
   const handleStartTrial = async () => {
     if (isStartingTrial) return;
-
-    const goToLogin = () => router.replace('/(auth)/login');
 
     setIsStartingTrial(true);
     try {
@@ -146,49 +144,41 @@ export default function PaywallScreen() {
   };
 
   const handleCheckEntitlement = async () => {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed || !trimmed.includes('@')) {
-      Alert.alert('Email invalide', "Entre l'adresse email utilisée lors de ton achat.");
-      return;
-    }
-
     setIsChecking(true);
     try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        throw new Error('not_authenticated');
+      const result = await useAuthStore.getState().linkPurchaseAccount();
+      const forEmail = 'email' in result && result.email ? ` pour ${result.email}` : '';
+
+      switch (result.kind) {
+        case 'linked':
+          Alert.alert('Compte relié', 'Ton abonnement est maintenant actif.', [
+            { text: 'Continuer', onPress: () => router.back() },
+          ]);
+          break;
+        case 'no_customer':
+          Alert.alert(
+            'Aucun achat trouvé',
+            `Aucun achat n'est associé à ton compte${forEmail}. Si tu as payé avec une autre adresse email, contacte le support depuis la page d'activation du site.`
+          );
+          break;
+        case 'no_active_subscription':
+          Alert.alert(
+            'Abonnement inactif',
+            `Un achat existe${forEmail}, mais aucun abonnement actif n'y est associé.`
+          );
+          break;
+        case 'email_not_confirmed':
+          Alert.alert('Email non confirmé', "Confirme d'abord l'adresse email de ton compte, puis réessaie.");
+          break;
+        case 'no_session':
+        case 'unauthorized':
+          Alert.alert('Session expirée', 'Session expirée, reconnecte-toi.', [
+            { text: 'Se reconnecter', onPress: goToLogin },
+          ]);
+          break;
+        default:
+          Alert.alert('Erreur de vérification', 'Vérifie ta connexion et réessaie dans un instant.');
       }
-
-      const response = await fetch(LINK_ACCOUNT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: trimmed, supabaseUserId: user.id }),
-      });
-
-      const data = await response.json();
-
-      if (data?.linked === true) {
-        Alert.alert('Compte relié', 'Ton abonnement est maintenant actif.', [
-          { text: 'Continuer', onPress: () => router.back() },
-        ]);
-        return;
-      }
-
-      if (data?.reason === 'no_customer') {
-        Alert.alert(
-          'Aucun achat trouvé',
-          "Cette adresse email ne correspond à aucun achat sur le site. Vérifie l'orthographe."
-        );
-      } else if (data?.reason === 'no_active_subscription') {
-        Alert.alert(
-          'Abonnement inactif',
-          "Un compte existe avec cette adresse, mais aucun abonnement actif n'y est associé."
-        );
-      } else {
-        Alert.alert('Erreur de vérification', 'Réessaie dans un instant.');
-      }
-    } catch (err) {
-      Alert.alert('Erreur', 'Vérifie ta connexion et réessaie.');
     } finally {
       setIsChecking(false);
     }
@@ -308,19 +298,10 @@ export default function PaywallScreen() {
           <View style={styles.linkArea}>
             <Text style={styles.linkTitle}>Relier ton abonnement</Text>
             <Text style={styles.linkSubtitle}>
-              Entre l'adresse email utilisée lors de ton achat sur le site.
+              {authUser?.email
+                ? `On cherche ton achat sur le site avec l'adresse de ton compte : ${authUser.email}.`
+                : "On cherche ton achat sur le site avec l'adresse email de ton compte."}
             </Text>
-
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="ton@email.com"
-              placeholderTextColor={Colors.text.muted}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              editable={!isChecking}
-            />
 
             <TouchableOpacity
               style={[styles.ctaBtnInline, isChecking && styles.ctaBtnDisabled]}

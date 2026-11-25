@@ -4,18 +4,24 @@ import {
   TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Flame, MessageCircle, PenLine, BookOpen, Compass, ChevronRight } from 'lucide-react-native';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
+import { SafeScreen } from '../../components/layout/SafeScreen';
 import { Card, Badge, ProgressBar } from '../../components/ui';
 import { useAuthStore } from '../../store/authStore';
-import { updateStreak, logDailyActivity, getWeekActivity } from '../../services/supabase';
+import { updateStreak, logDailyActivity, getWeekActivity, getLocalDateString } from '../../services/supabase';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { getPillarById } from '../../constants/pillars';
 import { getCompletedLessonIds, getCurrentActiveLesson, getDailyQuote, getOverallProgress, getNextUnlockDate, getLastCompletedLesson } from '../../constants/progression';
+import { DailyCard } from '../../components/DailyCard';
+import { DiscoverSection } from '../../components/DiscoverSection';
 
 const DAY_LABELS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const { user, streak, aiQuota, isLoading, refreshStreak, userProgress } = useAuthStore();
   const [updating, setUpdating] = useState(false);
   const [weekActivityDates, setWeekActivityDates] = useState<string[]>([]);
@@ -68,26 +74,28 @@ export default function HomeScreen() {
     monday.setDate(now.getDate() + diffToMonday);
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
-    const dayStr = d.toISOString().split('T')[0];
+    const dayStr = getLocalDateString(d);
     return weekActivityDates.includes(dayStr);
   });
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color={Colors.brand.gold} size="large" />
-        <Text style={styles.loadingTxt}>Chargement de ton Code...</Text>
-      </View>
+      <SafeScreen edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color={Colors.brand.gold} size="large" />
+          <Text style={styles.loadingTxt}>Chargement de ton Code...</Text>
+        </View>
+      </SafeScreen>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeScreen edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Bonjour, {prenom} 👋</Text>
+            <Text style={styles.greeting}>Bonjour, {prenom}</Text>
             <Text style={styles.date}>{dateCapitalized}</Text>
           </View>
           <TouchableOpacity
@@ -102,9 +110,9 @@ export default function HomeScreen() {
 
         <View style={styles.content}>
           {/* Streak — Feu Intérieur */}
-          <Card style={styles.streakCard} variant="gold">
+          <Card style={styles.streakCard} variant="gold" onPress={() => router.push('/tracker')}>
             <View style={styles.streakTop}>
-              <Text style={styles.streakIcon}>🔥</Text>
+              <Flame size={28} color={Colors.brand.gold} fill={Colors.brand.gold} />
               <Text style={styles.streakNumber}>{currentStreak}</Text>
               <View>
                 <Text style={styles.streakLabel}>
@@ -129,6 +137,28 @@ export default function HomeScreen() {
             </View>
           </Card>
 
+                  
+
+          <View style={{ height: Spacing.lg }} />
+
+          {/* Mandala — accès direct aux 3 piliers prioritaires */}
+          <Card style={styles.mandalaCard} variant="bordered" onPress={() => router.push('/mandala')}>
+            <View style={styles.mandalaRow}>
+              <View style={styles.mandalaIconWrap}>
+                <Compass size={22} color={Colors.brand.gold} />
+              </View>
+              <View style={styles.mandalaTextArea}>
+                <Text style={styles.mandalaTitle}>Ton Mandala</Text>
+                <Text style={styles.mandalaSub}>Tes 3 piliers prioritaires, un objectif chacun</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.text.muted} />
+            </View>
+          </Card>
+
+          <View style={{ height: Spacing.lg }} />
+          <DailyCard />
+
+                    
           {/* Contenu du jour */}
           <Text style={styles.sectionTitle}>Contenu du jour</Text>
         {currentLesson && currentPillar ? (
@@ -170,7 +200,7 @@ export default function HomeScreen() {
               style={styles.shortcutCard}
               onPress={() => router.push('/(tabs)/coach')}
             >
-              <Text style={styles.shortcutIcon}>💬</Text>
+              <MessageCircle size={22} color={Colors.brand.gold} style={styles.shortcutIcon} />
               <Text style={styles.shortcutTitle}>Prince Johann</Text>
               <Text style={styles.shortcutSub}>
                 {isPremium ? 'Illimité ✦' : `${messagesRemaining} restants`}
@@ -178,7 +208,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.shortcutCard} onPress={() => router.push('/journal')}>
-            <Text style={styles.shortcutIcon}>📝</Text>
+            <PenLine size={22} color={Colors.brand.gold} style={styles.shortcutIcon} />
             <Text style={styles.shortcutTitle}>Mon journal</Text>
             <Text style={styles.shortcutSub}>Écrire</Text>
             </TouchableOpacity>
@@ -187,7 +217,7 @@ export default function HomeScreen() {
               style={styles.shortcutCard}
               onPress={() => router.push('/(tabs)/bibliotheque')}
             >
-              <Text style={styles.shortcutIcon}>📚</Text>
+              <BookOpen size={22} color={Colors.brand.gold} style={styles.shortcutIcon} />
               <Text style={styles.shortcutTitle}>Bibliothèque</Text>
               <Text style={styles.shortcutSub}>Ressources</Text>
             </TouchableOpacity>
@@ -209,10 +239,14 @@ export default function HomeScreen() {
           <Text style={styles.quoteSource}>— {dailyQuote.source}</Text>
           </Card>
 
-          <View style={{ height: Spacing['3xl'] }} />
+          <DiscoverSection />
+
+          {/* Dégagement dynamique : hauteur de la pill (68) + sa marge (16)
+              + l'inset système réel de l'appareil + marge de respiration */}
+          <View style={{ height: 68 + 16 + insets.bottom + 16 }} />
         </View>
       </ScrollView>
-    </View>
+    </SafeScreen>
   );
 }
 
@@ -222,7 +256,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background.primary },
   loadingContainer: { flex: 1, backgroundColor: Colors.background.primary, alignItems: 'center', justifyContent: 'center', gap: Spacing.base },
   loadingTxt: { ...Typography.body, color: Colors.text.muted },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.xl, paddingTop: Spacing['3xl'], paddingBottom: Spacing.lg, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: Spacing.lg, borderBottomWidth: 1, borderBottomColor: Colors.border.subtle },
   greeting: { ...Typography.h3, color: Colors.text.primary },
   date: { ...Typography.body, color: Colors.text.secondary, marginTop: 2 },
   avatarBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: Colors.background.secondary, borderWidth: 1.5, borderColor: Colors.brand.gold, alignItems: 'center', justifyContent: 'center' },
@@ -231,7 +265,6 @@ const styles = StyleSheet.create({
   sectionTitle: { ...Typography.label, color: Colors.text.secondary, marginBottom: Spacing.md, marginTop: Spacing.xl },
   streakCard: { marginBottom: 0 },
   streakTop: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.lg, gap: Spacing.sm },
-  streakIcon: { fontSize: 28 },
   streakNumber: { ...Typography.number, color: Colors.brand.gold },
   streakLabel: { ...Typography.bodyLarge, color: Colors.text.secondary },
   streakSub: { ...Typography.caption, color: Colors.text.muted },
@@ -242,6 +275,12 @@ const styles = StyleSheet.create({
   dayDot: { fontSize: 14, color: Colors.text.muted },
   dayDotActive: { color: Colors.text.inverse },
   dayLabel: { ...Typography.caption, color: Colors.text.muted },
+  mandalaCard: { marginBottom: 0, paddingVertical: Spacing.md },
+  mandalaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  mandalaIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.background.tertiary, alignItems: 'center', justifyContent: 'center' },
+  mandalaTextArea: { flex: 1 },
+  mandalaTitle: { ...Typography.body, color: Colors.text.primary, fontWeight: '600', marginBottom: 2 },
+  mandalaSub: { ...Typography.bodySmall, color: Colors.text.secondary },
   contentCard: { marginBottom: 0 },
   contentBadge: { marginBottom: Spacing.sm },
   contentWeek: { ...Typography.caption, color: Colors.text.muted, marginBottom: Spacing.xs },
@@ -254,7 +293,7 @@ const styles = StyleSheet.create({
   continueBtnText: { ...Typography.button, color: Colors.text.inverse },
   shortcuts: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.xl },
   shortcutCard: { flex: 1, backgroundColor: Colors.background.secondary, borderRadius: Radius.lg, padding: Spacing.md, borderWidth: 1, borderColor: Colors.border.default },
-  shortcutIcon: { fontSize: 22, marginBottom: Spacing.xs },
+  shortcutIcon: { marginBottom: Spacing.xs },
   shortcutTitle: { ...Typography.bodySmall, color: Colors.text.primary, fontWeight: '600', marginBottom: 2 },
   shortcutSub: { ...Typography.caption, color: Colors.text.muted },
   progressCard: { marginTop: Spacing.xl },
