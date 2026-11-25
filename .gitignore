@@ -14,3 +14,8 @@ expo-env.d.ts
 SMTP *.txt
 xsmtpsib-*.txt
 fce15784-*.txt
+
+# Fichiers locaux sensibles : jamais sur GitHub ni dans un upload EAS
+/SECURITY-AUDIT.md
+/app.zip
+/eas.zip
