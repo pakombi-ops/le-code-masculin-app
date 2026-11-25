@@ -75,8 +75,10 @@ describe('sendCoachMessage (format a49b96c)', () => {
     [401, { error: 'Session invalide.' }, { kind: 'unauthorized' }],
     [429, { error: 'busy' }, { kind: 'rate_limited' }],
     [400, { error: 'Message trop long.' }, { kind: 'bad_request', message: 'Message trop long.' }],
-    [502, { error: 'provider_error' }, { kind: 'error' }],
-    [503, { error: 'quota_unavailable' }, { kind: 'error' }],
+    [502, { error: 'provider_error' }, { kind: 'unavailable' }],
+    [503, { error: 'quota_unavailable' }, { kind: 'unavailable' }],
+    [529, { error: 'overloaded' }, { kind: 'unavailable' }],
+    [500, { error: 'server_error' }, { kind: 'error' }],
   ])('statut %i', async (status, body, expected) => {
     const fetchFn = jest.fn().mockResolvedValue(jsonResponse(status, body));
     expect(await sendCoachMessage({ message: 'x', history: [] }, { getSession: sessionOk, fetchFn })).toEqual(expected);
