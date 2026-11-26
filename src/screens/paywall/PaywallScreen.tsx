@@ -13,6 +13,10 @@ import { SafeScreen } from '../../components/layout/SafeScreen';
 import { supabase } from '../../services/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { startAppCheckout } from '../../services/appCheckout';
+import {
+  CheckoutReturn, markCheckoutStarted, markCheckoutEnded, parseCheckoutUrl,
+  claimCheckoutReturn, presentCheckoutReturn,
+} from '../../services/checkoutReturn';
 
 const GENERIC_CHECKOUT_ERROR = "Impossible de démarrer l'essai pour le moment. Réessaie dans un instant.";
 
@@ -118,24 +122,34 @@ export default function PaywallScreen() {
         return;
       }
 
-      const result = await WebBrowser.openAuthSessionAsync(checkout.url, redirectUrl);
-
-      if (result.type === 'success' && result.url.includes('status=success')) {
-        // On n'accorde rien localement : on relit l'état côté serveur.
-        const { user, checkEntitlement } = useAuthStore.getState();
-        if (user?.id) await checkEntitlement(user.id);
-        const active = useAuthStore.getState().entitlement.active;
-
-        Alert.alert(
-          active ? 'Accès activé 🎉' : 'Paiement reçu',
-          active
-            ? 'Ton accès premium est actif.'
-            : "Ton accès premium s'active dans les prochaines minutes. Reviens sur cet écran si besoin.",
-          [{ text: 'Continuer', onPress: () => router.back() }]
-        );
+      // La session intercepte le retour ; sur Android, Expo Router reçoit aussi
+      // le lien et ouvre app/checkout-return.tsx, qui se retire et nous laisse
+      // l'alerte (voir src/services/checkoutReturn.ts).
+      markCheckoutStarted();
+      let result: WebBrowser.WebBrowserAuthSessionResult;
+      let fromRoute: CheckoutReturn | null = null;
+      try {
+        result = await WebBrowser.openAuthSessionAsync(checkout.url, redirectUrl);
+      } finally {
+        fromRoute = markCheckoutEnded();
       }
-      // 'cancel', 'dismiss', ou retour avec status=cancelled : l'utilisateur a
-      // fermé/annulé, on ne fait rien de plus
+
+      // Retour transmis par la session, sinon celui reçu par la route
+      // (navigateur fermé avant que la session ne voie le lien).
+      const ret = result.type === 'success' ? parseCheckoutUrl(result.url) : fromRoute;
+      if (!ret || !claimCheckoutReturn(ret)) return; // fermé sans retour, ou déjà traité
+
+      // On n'accorde rien localement : on relit l'état côté serveur.
+      const { user, checkEntitlement } = useAuthStore.getState();
+      const outcome = await presentCheckoutReturn(ret, {
+        userId: user?.id,
+        checkEntitlement,
+        isActive: () => useAuthStore.getState().entitlement.active,
+        alert: (title, message, onClose) =>
+          Alert.alert(title, message, [{ text: 'Continuer', onPress: onClose }], { cancelable: false }),
+      });
+      // Succès : on quitte le paywall. Annulation : on y reste pour réessayer.
+      if (outcome === 'activated' || outcome === 'pending') router.back();
     } catch (err) {
       Alert.alert('Erreur de connexion', 'Vérifie ta connexion et réessaie.');
     } finally {
