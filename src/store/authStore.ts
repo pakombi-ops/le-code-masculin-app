@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { supabase, getUserProfile, getUserStreak, getAiQuota, getUserProgress, markLessonCompleted } from '../services/supabase';
 import { linkCurrentAccount, checkEntitlementStatus, LinkPurchaseResult } from '../services/entitlements';
 import { initNotifications, refreshStreakAlert, scheduleReactivationReminders } from '../services/notifications';
+import { resolvePrenom } from '../utils/displayName';
 
 interface UserProfile {
   id: string;
@@ -73,14 +74,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await new Promise(r => setTimeout(r, 300));
 
-      const [streakRes, quotaRes, progressRes] = await Promise.all([
+      const [streakRes, quotaRes, progressRes, profileRes] = await Promise.all([
         getUserStreak(userId),
         getAiQuota(userId),
         getUserProgress(userId),
+        // Un profil illisible ne doit pas bloquer le reste du chargement :
+        // on garde alors le prénom des métadonnées.
+        getUserProfile(userId).catch(() => ({ data: null, error: null })),
       ]);
 
       set((state) => ({
-        user: state.user ?? null,
+        // Prénom : profiles.prenom en priorité, sinon user_metadata.prenom
+        // (déjà dans state.user, posé par _layout à l'ouverture de session).
+        user: state.user
+          ? { ...state.user, prenom: resolvePrenom(profileRes.data?.prenom, state.user.prenom) }
+          : null,
         streak: streakRes.data,
         aiQuota: quotaRes.data,
         userProgress: progressRes.data ?? [],

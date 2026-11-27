@@ -103,7 +103,7 @@ export default function ProfilScreen() {
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordError, setPasswordError] = useState('');
 
-  const prenom = user?.prenom ?? user?.name ?? 'Utilisateur';
+  const prenom = user?.prenom || user?.name || 'Utilisateur';
   const email = user?.email ?? '';
   const niveau = user?.niveau ?? "L'Homme qui Cherche";
   const currentStreak = streak?.current_streak ?? 0;

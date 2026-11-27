@@ -48,7 +48,7 @@ export default function HomeScreen() {
   const dateLabel = format(new Date(), "EEEE d MMMM", { locale: fr });
   const dateCapitalized = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
 
-  const prenom = user?.prenom ?? user?.name ?? 'Ami';
+  const prenom = user?.prenom || user?.name || 'Ami';
   const currentStreak = streak?.current_streak ?? 0;
   const messagesUsed = aiQuota?.messages_used ?? 0;
   const messagesRemaining = Math.max(0, 10 - messagesUsed);
