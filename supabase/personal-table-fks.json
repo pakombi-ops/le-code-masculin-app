@@ -1,7 +1,13 @@
 {
   "_source": "Résultat de la requête B de supabase/checks/personal-table-fks.sql (clés étrangères entre les 17 tables personnelles). À remplacer par la sortie de la requête après chaque changement de schéma.",
-  "_verifie_le": "2026-11-27 (relecture : user_mandala → diagnostic_results, sans cascade)",
+  "_verifie_le": "2026-11-27 en production. Clés venant d'une table hors des 17 vers les 17 : aucune (requête A). Clé sortante hors liste, sans effet sur l'effacement : user_mandala → pillar_mandala_templates (NO ACTION).",
   "fks": [
-    { "child": "user_mandala", "parent": "diagnostic_results", "on_delete": "NO ACTION" }
+    { "child": "ai_quota", "parent": "profiles", "on_delete": "CASCADE", "base": "production" },
+    { "child": "conversations", "parent": "profiles", "on_delete": "CASCADE", "base": "production" },
+    { "child": "journal_entries", "parent": "profiles", "on_delete": "CASCADE", "base": "production" },
+    { "child": "streaks", "parent": "profiles", "on_delete": "CASCADE", "base": "production" },
+    { "child": "user_pillar_priority", "parent": "diagnostic_results", "on_delete": "SET NULL", "base": "production" },
+    { "child": "user_progress", "parent": "profiles", "on_delete": "CASCADE", "base": "production" },
+    { "child": "user_mandala", "parent": "diagnostic_results", "on_delete": "NO ACTION", "base": "test (absente en production, gardée par prudence)" }
   ]
 }
