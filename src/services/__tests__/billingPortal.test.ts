@@ -1,4 +1,13 @@
-import { requestBillingPortal, BILLING_PORTAL_URL, billingPortalMessage } from '../billingPortal';
+import { requestBillingPortal, BILLING_PORTAL_URL, billingPortalMessage, showManageSubscription } from '../billingPortal';
+
+describe('showManageSubscription', () => {
+  it('visible seulement avec un abonnement en cours, hors iOS', () => {
+    expect(showManageSubscription({ hasSubscription: true }, 'android')).toBe(true);
+    expect(showManageSubscription({ hasSubscription: true }, 'ios')).toBe(false);
+    expect(showManageSubscription({ hasSubscription: false }, 'android')).toBe(false);
+    expect(showManageSubscription({}, 'android')).toBe(false); // ancien backend : champ absent
+  });
+});
 
 const TOKEN = 'supabase-access-token';
 const withSession = (token: string | null = TOKEN) =>

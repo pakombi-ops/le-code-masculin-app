@@ -18,7 +18,7 @@ const mockRouter = require('expo-router').router as Record<string, jest.Mock>;
 // ---------------------------------------------------------------- store simulé
 const mockState: any = {
   user: { id: 'u1' },
-  entitlement: { active: false, planType: null },
+  entitlement: { active: false, planType: null, hasSubscription: false },
   checkEntitlement: jest.fn(),
 };
 jest.mock('../store/authStore', () => {

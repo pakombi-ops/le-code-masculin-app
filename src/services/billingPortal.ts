@@ -13,6 +13,15 @@ import { ENTITLEMENTS_BACKEND_URL } from './entitlements';
 export const BILLING_RETURN_URL = 'lecodemasculin://billing-return';
 export const BILLING_PORTAL_URL = `${ENTITLEMENTS_BACKEND_URL}/api/billing-portal`;
 
+/**
+ * « Gérer mon abonnement » n'est affiché que si le membre a un abonnement Stripe
+ * en cours (pas pour un accès offert ni pour le fondateur), et jamais sur iOS :
+ * l'App Store interdit de renvoyer vers un paiement hors de l'app.
+ */
+export function showManageSubscription(entitlement: { hasSubscription?: boolean }, os: string): boolean {
+  return os !== 'ios' && entitlement.hasSubscription === true;
+}
+
 export type BillingPortalResult =
   | { kind: 'ok'; url: string }
   | { kind: 'no_session' }

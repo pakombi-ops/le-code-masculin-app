@@ -28,6 +28,8 @@ export type EntitlementStatus = {
   trialEndsAt: string | null;
   planType: string | null;
   accessExpiresAt: string | null;
+  /** Abonnement Stripe en cours (backend feat/customer-portal). Absent = false. */
+  hasSubscription?: boolean;
 };
 
 const parseJsonSafe = async (response: Response): Promise<any> => {

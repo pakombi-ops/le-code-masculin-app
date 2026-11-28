@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Switch, Alert, Modal, TextInput, Linking, ActivityIndicator,
+  TouchableOpacity, Switch, Alert, Modal, TextInput, Linking, ActivityIndicator, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -19,7 +19,7 @@ import { updatePassword } from '../../services/supabase';
 import { getNotificationPrefs, setNotificationPref } from '../../services/notifications';
 import { exportUserData } from '../../services/dataExport';
 import { supabase } from '../../services/supabase';
-import { requestBillingPortal, billingPortalMessage, BILLING_RETURN_URL } from '../../services/billingPortal';
+import { requestBillingPortal, billingPortalMessage, BILLING_RETURN_URL, showManageSubscription } from '../../services/billingPortal';
 
 
 const PRIVACY_URL = 'https://pilierconscient.com/politique-de-confidentialite/';
@@ -101,6 +101,7 @@ export default function ProfilScreen() {
   };
 
   const [openingPortal, setOpeningPortal] = useState(false);
+  const canManageSubscription = useAuthStore((s) => showManageSubscription(s.entitlement, Platform.OS));
 
   // « Gérer mon abonnement » : portail Stripe (annulation, pause, carte, factures)
   // dans le navigateur intégré. Au retour, l'accès est relu côté serveur.
@@ -294,7 +295,7 @@ export default function ProfilScreen() {
               </TouchableOpacity>
             )}
           </View>
-          {isPremium && (
+          {canManageSubscription && (
             <View style={[styles.settingsCard, { marginTop: Spacing.sm }]}>
               <SettingRow
                 icon={<CreditCard size={18} color={Colors.text.secondary} />}

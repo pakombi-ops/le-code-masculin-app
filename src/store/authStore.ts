@@ -39,7 +39,7 @@ interface AuthState {
   logout: () => Promise<void>;
   refreshQuota: (userId: string) => Promise<void>;
   refreshStreak: (userId: string) => Promise<void>;
-  entitlement: { active: boolean; planType: string | null };
+  entitlement: { active: boolean; planType: string | null; hasSubscription: boolean };
   checkEntitlement: (userId: string) => Promise<void>;
   linkPurchaseAccount: () => Promise<LinkPurchaseResult>;
 }
@@ -135,14 +135,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  entitlement: { active: false, planType: null },
+  entitlement: { active: false, planType: null, hasSubscription: false },
 
   checkEntitlement: async (userId: string) => {
     try {
       // Jeton Supabase obligatoire (backend a49b96c). En cas d'échec, on garde
       // l'état précédent au lieu de verrouiller à tort un abonné.
       const result = await checkEntitlementStatus(userId, { getSession: () => supabase.auth.getSession() });
-      set({ entitlement: { active: result.active, planType: result.planType } });
+      set({ entitlement: { active: result.active, planType: result.planType, hasSubscription: result.hasSubscription === true } });
     } catch (err) {
       console.error('Erreur checkEntitlement:', err);
     }
