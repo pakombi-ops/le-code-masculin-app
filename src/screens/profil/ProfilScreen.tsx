@@ -14,7 +14,8 @@ import { SafeScreen } from '../../components/layout/SafeScreen';
 import { ProgressBar } from '../../components/ui';
 import { useAuthStore } from '../../store/authStore';
 import { getCompletedLessonIds, getOverallProgress } from '../../constants/progression';
-import { updatePassword } from '../../services/supabase';
+import { signIn, updatePassword } from '../../services/supabase';
+import { changePassword, passwordChangeMessage } from '../../services/passwordChange';
 import { getNotificationPrefs, setNotificationPref } from '../../services/notifications';
 import { exportUserData } from '../../services/dataExport';
 
@@ -98,6 +99,7 @@ export default function ProfilScreen() {
   };
 
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
@@ -132,31 +134,35 @@ export default function ProfilScreen() {
     );
   };
 
+  const resetPasswordForm = () => {
+    setPasswordError('');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+  };
+
+  // Le mot de passe actuel est vérifié (reconnexion) avant d'accepter le nouveau.
   const handleChangePassword = async () => {
     setPasswordError('');
-
-    if (newPassword.length < 8) {
-      setPasswordError('8 caracteres minimum.');
-      return;
-    }
-    if (newPassword !== confirmNewPassword) {
-      setPasswordError('Les mots de passe ne correspondent pas.');
-      return;
-    }
-
     setChangingPassword(true);
-    const { error } = await updatePassword(newPassword);
+    const result = await changePassword(
+      { email: user?.email ?? '', currentPassword, newPassword, confirmPassword: confirmNewPassword },
+      {
+        signInWithPassword: ({ email, password }) => signIn(email, password),
+        updateUser: ({ password }) => updatePassword(password),
+      }
+    );
     setChangingPassword(false);
 
-    if (error) {
-      setPasswordError("Impossible de changer le mot de passe. Reessaie.");
+    if (result !== 'changed') {
+      setPasswordError(passwordChangeMessage(result));
+      if (result === 'wrong_current') setCurrentPassword('');
       return;
     }
 
     setPasswordModalVisible(false);
-    setNewPassword('');
-    setConfirmNewPassword('');
-    Alert.alert('C\'est fait', 'Ton mot de passe a ete mis a jour.');
+    resetPasswordForm();
+    Alert.alert("C'est fait", 'Ton mot de passe a été mis à jour.');
   };
 
   const openPrivacy = () => {
@@ -363,12 +369,23 @@ export default function ProfilScreen() {
         <View style={{ height: 68 + 16 + insets.bottom + 16 }} />
       </ScrollView>
 
-      <Modal visible={passwordModalVisible} transparent animationType="slide" onRequestClose={() => setPasswordModalVisible(false)}>
+      <Modal visible={passwordModalVisible} transparent animationType="slide" onRequestClose={() => { setPasswordModalVisible(false); resetPasswordForm(); }}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Changer le mot de passe</Text>
-            <Text style={styles.modalSubtitle}>Choisis un nouveau mot de passe pour ton compte</Text>
+            <Text style={styles.modalSubtitle}>Saisis ton mot de passe actuel, puis le nouveau</Text>
             {passwordError ? <Text style={styles.modalError}>{passwordError}</Text> : null}
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Mot de passe actuel"
+              placeholderTextColor={Colors.text.muted}
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete="current-password"
+              textContentType="password"
+            />
             <TextInput
               style={styles.modalInput}
               placeholder="Nouveau mot de passe"
@@ -388,7 +405,7 @@ export default function ProfilScreen() {
             <TouchableOpacity style={styles.modalButton} onPress={handleChangePassword} disabled={changingPassword}>
               <Text style={styles.modalButtonText}>{changingPassword ? 'Mise a jour...' : 'Confirmer'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setPasswordModalVisible(false); setPasswordError(''); setNewPassword(''); setConfirmNewPassword(''); }}>
+            <TouchableOpacity onPress={() => { setPasswordModalVisible(false); resetPasswordForm(); }}>
               <Text style={styles.modalCancel}>Annuler</Text>
             </TouchableOpacity>
           </View>
