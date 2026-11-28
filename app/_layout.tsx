@@ -67,12 +67,12 @@ export default function RootLayout() {
         });
         useAuthStore.getState().loadUser(session.user.id);
 
-        const { pacteText, journalConsent, quizScores, reset } = useOnboardingStore.getState();
-        if (pacteText || quizScores) {
+        const { pacteText, journalConsentAt, quizScores, reset } = useOnboardingStore.getState();
+        if (pacteText || quizScores || journalConsentAt) {
           try {
             await Promise.all([
-              savePacteWithConsent(session.user.id, pacteText, journalConsent, {
-                grantJournalConsent: () => grantConsent('journal', supabase as unknown as ConsentClient),
+              savePacteWithConsent(session.user.id, pacteText, journalConsentAt, {
+                grantJournalConsent: (at) => grantConsent('journal', supabase as unknown as ConsentClient, at),
                 savePacteEntry,
               }),
               quizScores ? saveDiagnosticResults(session.user.id, quizScores) : Promise.resolve(),

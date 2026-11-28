@@ -29,7 +29,6 @@ export function ConsentGate({
       <Text style={styles.title}>{text.title}</Text>
       <Text style={styles.body}>{text.intro}</Text>
 
-      <Text style={styles.subtitle}>Ce que nous en faisons</Text>
       {text.points.map((p) => (
         <View key={p} style={styles.point}>
           <Text style={styles.bullet}>•</Text>
@@ -73,7 +72,6 @@ export function ConsentGate({
 const styles = StyleSheet.create({
   content: { padding: Spacing.xl, gap: Spacing.md, paddingBottom: Spacing['3xl'] },
   title: { ...Typography.h2, color: Colors.text.primary },
-  subtitle: { ...Typography.label, color: Colors.text.primary, marginTop: Spacing.sm },
   body: { ...Typography.body, color: Colors.text.secondary, lineHeight: 22 },
   point: { flexDirection: 'row', gap: Spacing.sm },
   bullet: { ...Typography.body, color: Colors.brand.gold },

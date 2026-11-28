@@ -305,7 +305,7 @@ export default function ProfilScreen() {
           <View style={styles.settingsCard}>
             <SettingRow
               icon={<Lock size={18} color={Colors.text.secondary} />}
-              label="Mes consentements"
+              label="Consentements"
               onPress={() => router.push('/consentements')}
             />
             <View style={styles.separator} />

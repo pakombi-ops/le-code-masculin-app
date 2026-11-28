@@ -19,8 +19,8 @@ export default function PacteScreen() {
   const buttonTranslate = useRef(new Animated.Value(20)).current;
   const setPacteText = useOnboardingStore((s) => s.setPacteText);
   // Accord « journal et pacte » demandé avant d'écrire ; enregistré en base à la sauvegarde du pacte.
-  const journalConsent = useOnboardingStore((s) => s.journalConsent);
-  const setJournalConsent = useOnboardingStore((s) => s.setJournalConsent);
+  const journalConsentAt = useOnboardingStore((s) => s.journalConsentAt);
+  const setJournalConsentAt = useOnboardingStore((s) => s.setJournalConsentAt);
   
   const returnDate = format(addYears(new Date(), 1), "d MMMM yyyy", { locale: fr });
   const wordCount  = text.trim().split(/\s+/).filter(Boolean).length;
@@ -47,12 +47,12 @@ export default function PacteScreen() {
     router.push('/(auth)/quiz');
   };
 
-  if (!journalConsent) {
+  if (!journalConsentAt) {
     return (
       <View style={styles.container}>
         <ConsentGate
           purpose="journal"
-          onAccept={() => setJournalConsent(true)}
+          onAccept={() => setJournalConsentAt(new Date().toISOString())}
           onDecline={() => { setPacteText(''); router.push('/(auth)/quiz'); }}
           declineLabel="Passer le pacte"
         />

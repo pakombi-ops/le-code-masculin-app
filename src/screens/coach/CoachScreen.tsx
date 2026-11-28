@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   FlatList, KeyboardAvoidingView, Platform, Keyboard,
-  ActivityIndicator, Dimensions,
+  ActivityIndicator, Dimensions, Modal,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,7 @@ import { CoachIntroOverlay } from '../../components/CoachIntroOverlay';
 import { ConsentGate } from '../../components/consent/ConsentGate';
 import { useConsentStore } from '../../store/consentStore';
 import { showConsentError } from '../../services/consentUi';
+import { shouldAskCoachConsent } from '../../services/consents';
 
 const COACH_INTRO_SEEN_KEY = 'coach_intro_seen';
 
@@ -125,20 +126,18 @@ export default function CoachScreen() {
   const isPremium = aiQuota?.is_premium ?? false;
 
   // ── Consentement explicite au coach (données pouvant révéler la santé) ──
+  // L'écran s'ouvre normalement ; l'accord est demandé au PREMIER MESSAGE envoyé.
+  // Le message attend l'accord : envoyé après « J'accepte », jamais sans.
   const coachConsent = useConsentStore((s) => s.coach);
   const loadConsents = useConsentStore((s) => s.load);
   const grantConsent = useConsentStore((s) => s.grant);
   const markConsentMissing = useConsentStore((s) => s.markMissing);
   const [grantingConsent, setGrantingConsent] = useState(false);
+  const [consentModalVisible, setConsentModalVisible] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   useEffect(() => {
     if (user?.id) loadConsents(user.id);
   }, [user?.id, loadConsents]);
-  const handleAcceptConsent = async () => {
-    setGrantingConsent(true);
-    const ok = await grantConsent('coach');
-    setGrantingConsent(false);
-    if (!ok) showConsentError();
-  };
 
   // Compteur local — démarre depuis le quota Supabase ou 0
   const [localUsed, setLocalUsed] = useState(aiQuota?.messages_used ?? 0);
@@ -185,7 +184,24 @@ export default function CoachScreen() {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
-  const sendMessage = async (text: string = input) => {
+  const handleAcceptConsent = async () => {
+    setGrantingConsent(true);
+    const ok = await grantConsent('coach');
+    setGrantingConsent(false);
+    if (!ok) { showConsentError(); return; }
+    setConsentModalVisible(false);
+    const waiting = pendingMessage;
+    setPendingMessage(null);
+    if (waiting) sendMessage(waiting, { consentGranted: true });
+  };
+
+  const handleDeclineConsent = () => {
+    // Rien n'est envoyé ; le texte tapé reste dans le champ.
+    setConsentModalVisible(false);
+    setPendingMessage(null);
+  };
+
+  const sendMessage = async (text: string = input, opts: { consentGranted?: boolean } = {}) => {
     const trimmed = text.trim();
 
     // CORRIGÉ : vérifié même si `trimmed` est vide, pour que le bouton
@@ -197,6 +213,13 @@ export default function CoachScreen() {
     }
 
     if (!trimmed || isLoading) return;
+
+    // Pas d'accord en cours (ou pas encore chargé) : on demande l'accord avant d'envoyer quoi que ce soit.
+    if (shouldAskCoachConsent(coachConsent, opts.consentGranted)) {
+      setPendingMessage(trimmed);
+      setConsentModalVisible(true);
+      return;
+    }
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: trimmed };
     const loadingId = (Date.now() + 1).toString();
@@ -261,7 +284,8 @@ export default function CoachScreen() {
           break;
         case 'consent_required':
           // Accord absent ou retiré côté serveur : l'écran d'accord s'affiche de nouveau.
-          showReply('Ton accord est nécessaire pour utiliser le coach.');
+          // Accord retiré ailleurs (autre appareil) : redemandé au prochain message.
+          showReply('Ton accord est nécessaire pour parler au coach. Renvoie ton message pour le donner.');
           markConsentMissing('coach');
           break;
         case 'rate_limited':
@@ -306,29 +330,6 @@ export default function CoachScreen() {
     );
   }
 
-  if (coachConsent === null) {
-    return (
-      <SafeScreen edges={['top']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={Colors.brand.gold} />
-        </View>
-      </SafeScreen>
-    );
-  }
-
-  if (coachConsent === false) {
-    return (
-      <SafeScreen edges={['top']}>
-        <ConsentGate
-          purpose="coach"
-          busy={grantingConsent}
-          onAccept={handleAcceptConsent}
-          onDecline={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/accueil'))}
-        />
-      </SafeScreen>
-    );
-  }
-
   if (loadingHistory) {
     return (
       <SafeScreen edges={['top']}>
@@ -342,6 +343,16 @@ export default function CoachScreen() {
 
   return (
     <SafeScreen edges={['top']}>
+      <Modal visible={consentModalVisible} animationType="slide" onRequestClose={handleDeclineConsent}>
+        <SafeScreen edges={['top']}>
+          <ConsentGate
+            purpose="coach"
+            busy={grantingConsent}
+            onAccept={handleAcceptConsent}
+            onDecline={handleDeclineConsent}
+          />
+        </SafeScreen>
+      </Modal>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

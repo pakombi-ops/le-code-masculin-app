@@ -76,11 +76,11 @@ export default function ResultatsScreen() {
     if (authUser) {
       setIsSaving(true);
       try {
-        const { pacteText, journalConsent, reset } = useOnboardingStore.getState();
+        const { pacteText, journalConsentAt, reset } = useOnboardingStore.getState();
 
         await Promise.all([
-          savePacteWithConsent(authUser.id, pacteText ?? '', journalConsent, {
-            grantJournalConsent: () => grantConsent('journal', supabase as unknown as ConsentClient),
+          savePacteWithConsent(authUser.id, pacteText ?? '', journalConsentAt, {
+            grantJournalConsent: (at) => grantConsent('journal', supabase as unknown as ConsentClient, at),
             savePacteEntry,
           }),
           saveDiagnosticResults(authUser.id, scores),

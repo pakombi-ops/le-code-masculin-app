@@ -7,15 +7,15 @@ import { SafeScreen } from '../../components/layout/SafeScreen';
 import { useAuthStore } from '../../store/authStore';
 import { useConsentStore } from '../../store/consentStore';
 import { supabase } from '../../services/supabase';
-import { CONSENT_LABELS, WITHDRAW_TEXT, ConsentPurpose } from '../../constants/consentTexts';
-import { fetchConsentEvents, currentGrantDate, ConsentEvent, ConsentClient, CONSENT_PURPOSES } from '../../services/consents';
+import { CONSENT_LABELS, WITHDRAW_TEXT, DELETE_CONVERSATIONS_TEXT, ConsentPurpose } from '../../constants/consentTexts';
+import { fetchConsentEvents, currentGrantDate, deleteMyConversations, ConsentEvent, ConsentClient, CONSENT_PURPOSES } from '../../services/consents';
 import { showConsentError } from '../../services/consentUi';
 
 /**
- * ÉCRAN — Mes consentements (Profil › Mes données)
+ * ÉCRAN — Consentements (Profil › Mes données › Consentements)
  * Deux accords séparés, chacun retirable. Au retrait : « Garder mes entrées »
  * ou « Tout supprimer » (journal et pacte, ou conversations du coach).
- * Donner l'accord se fait au premier usage de la fonction (journal, pacte, coach).
+ * Donner l'accord se fait au premier usage : ouverture du journal ou du pacte, premier message au coach.
  */
 export default function ConsentsScreen() {
   const userId = useAuthStore((s) => s.user?.id ?? '');
@@ -25,7 +25,7 @@ export default function ConsentsScreen() {
   const load = useConsentStore((s) => s.load);
   const withdraw = useConsentStore((s) => s.withdraw);
   const [events, setEvents] = useState<ConsentEvent[]>([]);
-  const [busy, setBusy] = useState<ConsentPurpose | null>(null);
+  const [busy, setBusy] = useState<ConsentPurpose | 'conversations' | null>(null);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
@@ -52,6 +52,25 @@ export default function ConsentsScreen() {
     ]);
   };
 
+  // Conversations du coach : suppression sans retrait de l'accord, après confirmation.
+  const doDeleteConversations = async () => {
+    setBusy('conversations');
+    const result = await deleteMyConversations(supabase as unknown as ConsentClient);
+    setBusy(null);
+    if (result.kind !== 'ok') {
+      Alert.alert('Suppression impossible', 'Vérifie ta connexion et réessaie.');
+      return;
+    }
+    Alert.alert('C\'est fait', DELETE_CONVERSATIONS_TEXT.done);
+  };
+
+  const askDeleteConversations = () => {
+    Alert.alert(DELETE_CONVERSATIONS_TEXT.title, DELETE_CONVERSATIONS_TEXT.message, [
+      { text: DELETE_CONVERSATIONS_TEXT.cancel, style: 'cancel' },
+      { text: DELETE_CONVERSATIONS_TEXT.confirm, style: 'destructive', onPress: doDeleteConversations },
+    ]);
+  };
+
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -62,7 +81,7 @@ export default function ConsentsScreen() {
           <ChevronLeft size={22} color={Colors.text.secondary} />
           <Text style={styles.backText}>Retour</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Mes consentements</Text>
+        <Text style={styles.title}>Consentements</Text>
         <Text style={styles.body}>
           Ton journal, ton pacte et tes échanges avec le coach peuvent révéler des informations sur ta santé.
           Ils ne sont utilisés qu'avec ton accord, donné au premier usage de chaque fonction.
@@ -87,8 +106,20 @@ export default function ConsentsScreen() {
                 </>
               ) : (
                 <Text style={styles.body}>
-                  Pas d'accord en cours : il te sera demandé à la prochaine ouverture {purpose === 'coach' ? 'du coach' : 'du journal'}.
+                  Pas d'accord en cours : il te sera demandé {purpose === 'coach' ? 'à ton prochain message au coach' : 'à la prochaine ouverture du journal'}.
                 </Text>
+              )}
+              {purpose === 'coach' && (
+                <TouchableOpacity
+                  onPress={askDeleteConversations}
+                  disabled={busy !== null}
+                  style={styles.withdraw}
+                  testID="delete-conversations"
+                >
+                  {busy === 'conversations'
+                    ? <ActivityIndicator color={Colors.status.error} />
+                    : <Text style={styles.withdrawText}>{DELETE_CONVERSATIONS_TEXT.button}</Text>}
+                </TouchableOpacity>
               )}
             </View>
           );

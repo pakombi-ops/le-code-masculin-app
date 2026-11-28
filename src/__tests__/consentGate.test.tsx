@@ -29,7 +29,7 @@ describe('ConsentGate', () => {
     let coach: any;
     act(() => { journal = renderer.create(<ConsentGate purpose="journal" onAccept={jest.fn()} onDecline={jest.fn()} />); });
     act(() => { coach = renderer.create(<ConsentGate purpose="coach" onAccept={jest.fn()} onDecline={jest.fn()} />); });
-    expect(JSON.stringify(journal.toJSON())).toMatch(/pacte/);
+    expect(JSON.stringify(journal.toJSON())).toMatch(/Ton journal reste à toi/);
     expect(JSON.stringify(journal.toJSON())).not.toMatch(/Voyage AI/);
     expect(JSON.stringify(coach.toJSON())).toMatch(/Voyage AI/);
   });

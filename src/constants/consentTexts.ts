@@ -1,12 +1,11 @@
 /**
- * TEXTES DES CONSENTEMENTS (journal + pacte, coach)
+ * TEXTES DES CONSENTEMENTS (journal + pacte, coach) — textes définitifs validés le 2026-11-28.
  *
- * ⚠ TEXTES PROVISOIRES : à remplacer par les deux blocs validés par Prince
- * AVANT toute mise en production. Changer un texte = changer sa `version`
- * (la version est enregistrée avec chaque accord, table user_consents).
+ * Changer un texte = changer sa `version` (la version est enregistrée avec
+ * chaque accord, table user_consents).
  *
- * Ne pas ajouter de phrase sur l'entraînement des modèles tant qu'elle n'est
- * pas vérifiée.
+ * Ne pas ajouter de phrase sur l'entraînement des modèles (décision du 2026-11-28 ;
+ * contrôlé par src/services/__tests__/consents.test.ts).
  */
 export type ConsentPurpose = 'journal' | 'coach';
 
@@ -18,48 +17,55 @@ export type ConsentText = {
   checkbox: string;
 };
 
-export const CONSENT_TEXTS_PROVISIONAL = true;
-
 export const CONSENT_TEXTS: Record<ConsentPurpose, ConsentText> = {
+  // Première ouverture du journal ou du pacte.
   journal: {
     version: 'journal-v1',
-    title: 'Ton journal et ton pacte restent à toi',
+    title: 'Ton journal reste à toi.',
     intro:
-      'Ce que tu écris dans ton journal et dans ton pacte peut révéler des informations sur ta santé, ' +
-      'physique ou mentale : sommeil, stress, humeur, addictions, vie intime… Ce sont des données sensibles. ' +
-      'Nous avons besoin de ton accord explicite pour les enregistrer.',
+      'Ce que tu y écris peut révéler des informations sur ta santé, physique ou mentale. ' +
+      "Nous avons besoin de ton accord explicite pour l'enregistrer.",
     points: [
-      "Ton journal et ton pacte sont enregistrés chez notre hébergeur, Supabase, et ne servent qu'à te rendre ce service.",
-      'Nous ne vendons pas tes données et ne les utilisons pas pour de la publicité.',
-      'Tu peux retirer ton accord à tout moment : Profil › Mes données › Mes consentements.',
+      "Il est stocké chez notre hébergeur, Supabase (Union européenne), et ne sert qu'à te rendre ce service.",
+      "L'équipe ne le consulte jamais, sauf si tu le demandes pour une assistance.",
+      'Tu peux retirer ton accord à tout moment : Profil › Mes données › Consentements.',
     ],
     checkbox:
       "J'accepte que mon journal et mon pacte, qui peuvent contenir des informations sur ma santé, " +
       'soient enregistrés pour me fournir ce service.',
   },
+  // Premier message envoyé au coach (l'écran du coach s'ouvre normalement).
   coach: {
     version: 'coach-v1',
-    title: 'Ce que tu confies au coach',
+    title: 'Avant de parler au coach.',
     intro:
-      'Ce que tu confies au coach peut révéler des informations sur ta santé, physique ou mentale : ' +
-      'sommeil, stress, humeur, addictions, vie intime… Ce sont des données sensibles. ' +
-      'Nous avons besoin de ton accord explicite pour les traiter.',
+      'Ce que tu lui confies peut révéler des informations sur ta santé. Pour te répondre, tes messages ' +
+      "sont envoyés à deux prestataires d'intelligence artificielle aux États-Unis : Anthropic (rédaction " +
+      'des réponses) et Voyage AI (recherche dans le programme).',
     points: [
-      "Pour te répondre, tes messages sont envoyés à nos prestataires d'intelligence artificielle, aux États-Unis : " +
-        'Anthropic (réponses du coach) et Voyage AI (recherche dans les contenus du Code Masculin).',
-      'Nous ne vendons pas tes données et ne les utilisons pas pour de la publicité.',
-      'Tu peux retirer ton accord à tout moment : Profil › Mes données › Mes consentements.',
+      "Ils ne servent qu'à te répondre.",
+      'Tes conversations sont conservées dans ton compte, et tu peux les supprimer.',
+      'Le coach ne remplace pas un professionnel de santé. En cas de détresse, appelle le 3114 (France) ou le 988 (Canada).',
     ],
     checkbox:
       "J'accepte que mes messages au coach, qui peuvent contenir des informations sur ma santé, " +
-      'soient traités par Anthropic et Voyage AI pour me répondre.',
+      'soient envoyés à ces prestataires et conservés pour me fournir ce service.',
   },
 };
 
-/** Libellés de l'écran « Mes consentements ». */
+/** Libellés de l'écran « Consentements ». */
 export const CONSENT_LABELS: Record<ConsentPurpose, string> = {
   journal: 'Journal et pacte',
   coach: 'Coach',
+};
+
+export const DELETE_CONVERSATIONS_TEXT = {
+  button: 'Supprimer mes conversations',
+  title: 'Supprimer mes conversations ?',
+  message: 'Tous tes échanges avec le coach seront effacés définitivement. Ton accord reste en place : tu peux continuer à parler au coach.',
+  confirm: 'Supprimer',
+  cancel: 'Annuler',
+  done: 'Tes conversations avec le coach ont été supprimées.',
 };
 
 export const WITHDRAW_TEXT = {

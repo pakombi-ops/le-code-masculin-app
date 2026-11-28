@@ -5,6 +5,12 @@
 --   'journal' : journal (journal_entries) et pacte (pacte_entries) ;
 --   'coach'   : coach IA (le backend refuse /api/chat* sans accord : 403 consent_required).
 --
+-- Deux dates par ligne :
+--   created_at  : écriture en base (horloge du serveur) ;
+--   accepted_at : moment de l'accord. Pour le pacte écrit pendant l'inscription,
+--                 c'est l'heure prise sur le téléphone, envoyée à la création du compte
+--                 (bornée : pas dans le futur, pas plus de 30 jours avant l'écriture).
+--
 -- Historique : chaque accord et chaque retrait ajoute une ligne (rien n'est
 -- modifié ni effacé, sauf à la suppression du compte, par cascade).
 -- Écriture seulement par les fonctions grant_consent / withdraw_consent.
@@ -36,6 +42,7 @@ create table if not exists public.user_consents (
   action       text not null check (action in ('granted', 'withdrawn')),
   text_version text not null check (length(text_version) between 1 and 40),
   erased_data  boolean not null default false,
+  accepted_at  timestamptz not null default now(),
   created_at   timestamptz not null default now()
 );
 create index if not exists user_consents_user_purpose_idx
@@ -69,7 +76,10 @@ $function$;
 
 -- Donner son accord (utilisateur connecté seulement). Sans effet si un accord
 -- de la même version est déjà en cours.
-create or replace function public.grant_consent(p_purpose text, p_text_version text)
+-- p_accepted_at : heure de l'accord prise sur le téléphone (pacte de l'inscription,
+-- accepté avant que le compte existe). Absente ou hors bornes (futur de plus de
+-- 5 minutes, ou plus de 30 jours avant maintenant) : on prend l'heure du serveur.
+create or replace function public.grant_consent(p_purpose text, p_text_version text, p_accepted_at timestamptz default null)
 returns void
 language plpgsql
 security definer
@@ -79,6 +89,7 @@ declare
   uid uuid := auth.uid();
   last_action text;
   last_version text;
+  accepted timestamptz := now();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   if p_purpose is null or p_purpose not in ('journal', 'coach') then raise exception 'invalid_purpose'; end if;
@@ -94,8 +105,14 @@ begin
     return;
   end if;
 
-  insert into public.user_consents (user_id, purpose, action, text_version)
-  values (uid, p_purpose, 'granted', trim(p_text_version));
+  if p_accepted_at is not null
+     and p_accepted_at <= now() + interval '5 minutes'
+     and p_accepted_at >= now() - interval '30 days' then
+    accepted := least(p_accepted_at, now());
+  end if;
+
+  insert into public.user_consents (user_id, purpose, action, text_version, accepted_at)
+  values (uid, p_purpose, 'granted', trim(p_text_version), accepted);
 end;
 $function$;
 
@@ -141,11 +158,32 @@ begin
 end;
 $function$;
 
+-- Supprimer ses conversations avec le coach SANS retirer l'accord
+-- (Profil › Mes données › Consentements › « Supprimer mes conversations »).
+create or replace function public.delete_my_conversations()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  uid uuid := auth.uid();
+  n integer;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  delete from public.conversations where user_id = uid;
+  get diagnostics n = row_count;
+  return n;
+end;
+$function$;
+
 revoke execute on function public.has_consent(uuid, text) from public, anon;
-revoke execute on function public.grant_consent(text, text) from public, anon;
+revoke execute on function public.delete_my_conversations() from public, anon;
+grant execute on function public.delete_my_conversations() to authenticated;
+revoke execute on function public.grant_consent(text, text, timestamptz) from public, anon;
 revoke execute on function public.withdraw_consent(text, boolean) from public, anon;
 grant execute on function public.has_consent(uuid, text) to authenticated, service_role;
-grant execute on function public.grant_consent(text, text) to authenticated;
+grant execute on function public.grant_consent(text, text, timestamptz) to authenticated;
 grant execute on function public.withdraw_consent(text, boolean) to authenticated;
 
 -- Règles RESTRICTIVES : s'ajoutent aux politiques existantes (propriétaire de
@@ -185,14 +223,19 @@ commit;
 -- select tablename, policyname, permissive, cmd from pg_policies
 -- where schemaname = 'public' and policyname like '%require_consent%' order by 1, 2;
 --
--- 2b. Droits (attendu : anon=false partout ; auth=true pour les 3 fonctions).
+-- 2b. Droits (attendu : anon=false partout ; auth=true pour les 4 fonctions).
 -- select p.proname, has_function_privilege('anon', p.oid, 'execute') as anon,
 --        has_function_privilege('authenticated', p.oid, 'execute') as auth
 -- from pg_proc p where p.pronamespace = 'public'::regnamespace
---   and p.proname in ('has_consent', 'grant_consent', 'withdraw_consent');
+--   and p.proname in ('has_consent', 'grant_consent', 'withdraw_consent', 'delete_my_conversations');
 --
 -- 2c. Aucun accord au départ (attendu : 0).
 -- select count(*) from public.user_consents;
 --
--- 2d. App, compte de test : écrire dans le journal SANS accord → refusé ; donner
+-- 2d. Heure d'acceptation : pour un compte créé après le pacte, accepted_at
+--     (téléphone) précède created_at (serveur) de quelques minutes.
+-- select purpose, action, accepted_at, created_at from public.user_consents
+-- where user_id = '<id du compte de test>' order by id;
+--
+-- 2e. App, compte de test : écrire dans le journal SANS accord → refusé ; donner
 --     l'accord → accepté ; retirer → refusé de nouveau ; les anciennes entrées restent lisibles.
