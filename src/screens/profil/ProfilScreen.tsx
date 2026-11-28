@@ -304,6 +304,12 @@ export default function ProfilScreen() {
           <Text style={styles.sectionTitle}>Mes donnees</Text>
           <View style={styles.settingsCard}>
             <SettingRow
+              icon={<Lock size={18} color={Colors.text.secondary} />}
+              label="Mes consentements"
+              onPress={() => router.push('/consentements')}
+            />
+            <View style={styles.separator} />
+            <SettingRow
               icon={<Download size={18} color={Colors.text.secondary} />}
               label="Exporter mes donnees"
               onPress={handleExportData}

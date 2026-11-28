@@ -7,6 +7,8 @@ import { Colors } from '../src/theme';
 import { supabase, getSession, savePacteEntry, saveDiagnosticResults, recomputePillarPriority } from '../src/services/supabase';
 import { useAuthStore } from '../src/store/authStore';
 import { useOnboardingStore } from '../src/store/onboardingStore';
+import { savePacteWithConsent } from '../src/services/pacteSave';
+import { grantConsent, ConsentClient } from '../src/services/consents';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -65,11 +67,14 @@ export default function RootLayout() {
         });
         useAuthStore.getState().loadUser(session.user.id);
 
-        const { pacteText, quizScores, reset } = useOnboardingStore.getState();
+        const { pacteText, journalConsent, quizScores, reset } = useOnboardingStore.getState();
         if (pacteText || quizScores) {
           try {
             await Promise.all([
-              savePacteEntry(session.user.id, pacteText),
+              savePacteWithConsent(session.user.id, pacteText, journalConsent, {
+                grantJournalConsent: () => grantConsent('journal', supabase as unknown as ConsentClient),
+                savePacteEntry,
+              }),
               quizScores ? saveDiagnosticResults(session.user.id, quizScores) : Promise.resolve(),
             ]);
             if (quizScores) {

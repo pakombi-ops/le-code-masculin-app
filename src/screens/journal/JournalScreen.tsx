@@ -8,6 +8,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { useAuthStore } from '../../store/authStore';
 import { getJournalEntries, saveJournalEntry, updateJournalEntry, deleteJournalEntry } from '../../services/supabase';
+import { ConsentGate } from '../../components/consent/ConsentGate';
+import { useConsentStore } from '../../store/consentStore';
+import { showConsentError } from '../../services/consentUi';
 
 interface JournalEntry {
   id: string;
@@ -26,6 +29,21 @@ const STOIC_QUESTIONS = [
 export default function JournalScreen() {
   const { user, aiQuota } = useAuthStore();
   const isPremium = aiQuota?.is_premium ?? false;
+
+  // ── Consentement explicite « journal et pacte » ──
+  const journalConsent = useConsentStore((s) => s.journal);
+  const loadConsents = useConsentStore((s) => s.load);
+  const grantConsent = useConsentStore((s) => s.grant);
+  const [grantingConsent, setGrantingConsent] = useState(false);
+  useEffect(() => {
+    if (user?.id) loadConsents(user.id);
+  }, [user?.id, loadConsents]);
+  const handleAcceptConsent = async () => {
+    setGrantingConsent(true);
+    const ok = await grantConsent('journal');
+    setGrantingConsent(false);
+    if (!ok) showConsentError();
+  };
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -166,6 +184,23 @@ export default function JournalScreen() {
       day: 'numeric', month: 'long', year: 'numeric',
     });
   };
+
+  if (journalConsent !== true) {
+    return (
+      <View style={styles.container}>
+        {journalConsent === null ? (
+          <ActivityIndicator color={Colors.brand.gold} style={{ marginTop: Spacing['3xl'] }} />
+        ) : (
+          <ConsentGate
+            purpose="journal"
+            busy={grantingConsent}
+            onAccept={handleAcceptConsent}
+            onDecline={() => router.back()}
+          />
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

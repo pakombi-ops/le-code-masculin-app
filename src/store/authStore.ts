@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useConsentStore } from './consentStore';
 import { supabase, getUserProfile, getUserStreak, getAiQuota, getUserProgress, markLessonCompleted } from '../services/supabase';
 import { linkCurrentAccount, checkEntitlementStatus, LinkPurchaseResult } from '../services/entitlements';
 import { initNotifications, refreshStreakAlert, scheduleReactivationReminders } from '../services/notifications';
@@ -114,6 +115,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: async () => {
     await supabase.auth.signOut();
+    useConsentStore.getState().reset();
     set({
       user: null,
       streak: null,

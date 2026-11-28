@@ -10,6 +10,7 @@ import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { addYears, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useOnboardingStore } from '../../store/onboardingStore';
+import { ConsentGate } from '../../components/consent/ConsentGate';
 
 export default function PacteScreen() {
   const [text, setText] = useState('');
@@ -17,6 +18,9 @@ export default function PacteScreen() {
   const buttonOpacity  = useRef(new Animated.Value(0)).current;
   const buttonTranslate = useRef(new Animated.Value(20)).current;
   const setPacteText = useOnboardingStore((s) => s.setPacteText);
+  // Accord « journal et pacte » demandé avant d'écrire ; enregistré en base à la sauvegarde du pacte.
+  const journalConsent = useOnboardingStore((s) => s.journalConsent);
+  const setJournalConsent = useOnboardingStore((s) => s.setJournalConsent);
   
   const returnDate = format(addYears(new Date(), 1), "d MMMM yyyy", { locale: fr });
   const wordCount  = text.trim().split(/\s+/).filter(Boolean).length;
@@ -42,6 +46,19 @@ export default function PacteScreen() {
     setPacteText(text.trim());
     router.push('/(auth)/quiz');
   };
+
+  if (!journalConsent) {
+    return (
+      <View style={styles.container}>
+        <ConsentGate
+          purpose="journal"
+          onAccept={() => setJournalConsent(true)}
+          onDecline={() => { setPacteText(''); router.push('/(auth)/quiz'); }}
+          declineLabel="Passer le pacte"
+        />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>

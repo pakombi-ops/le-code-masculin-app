@@ -7,7 +7,9 @@ import { PILLARS, getPillarById } from '../../constants/pillars';
 import { getWeakestPillars } from '../../constants/quiz';
 import { useAuthStore } from '../../store/authStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
-import { savePacteEntry, saveDiagnosticResults, recomputePillarPriority } from '../../services/supabase';
+import { supabase, savePacteEntry, saveDiagnosticResults, recomputePillarPriority } from '../../services/supabase';
+import { savePacteWithConsent } from '../../services/pacteSave';
+import { grantConsent, ConsentClient } from '../../services/consents';
 
 const { width } = Dimensions.get('window');
 const RADAR_SIZE = width - 80;
@@ -74,10 +76,13 @@ export default function ResultatsScreen() {
     if (authUser) {
       setIsSaving(true);
       try {
-        const { pacteText, reset } = useOnboardingStore.getState();
+        const { pacteText, journalConsent, reset } = useOnboardingStore.getState();
 
         await Promise.all([
-          savePacteEntry(authUser.id, pacteText ?? ''),
+          savePacteWithConsent(authUser.id, pacteText ?? '', journalConsent, {
+            grantJournalConsent: () => grantConsent('journal', supabase as unknown as ConsentClient),
+            savePacteEntry,
+          }),
           saveDiagnosticResults(authUser.id, scores),
         ]);
         await recomputePillarPriority(authUser.id);

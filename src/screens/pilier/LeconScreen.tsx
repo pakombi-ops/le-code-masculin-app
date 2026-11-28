@@ -13,6 +13,9 @@ import { getNextLesson, getLessonStatus, getCompletedLessonIds } from '../../con
 import { fetchLessonVideos, toLoomEmbedUrl, type LessonVideoMap } from '../../services/lessonVideosService';
 import { Modal, TextInput } from 'react-native';
 import { getJournalEntryForLesson, saveLessonJournalEntry } from '../../services/supabase';
+import { ConsentGate } from '../../components/consent/ConsentGate';
+import { useConsentStore } from '../../store/consentStore';
+import { showConsentError } from '../../services/consentUi';
 
 const { width } = Dimensions.get('window');
 type Tab = 'resume' | 'defi' | 'notes';
@@ -46,6 +49,28 @@ export default function LeconScreen() {
   const [journalEntryId, setJournalEntryId] = useState<string | null>(null);
   const [journalSaving, setJournalSaving] = useState(false);
   const [journalLoaded, setJournalLoaded] = useState(false);
+
+  // ── Consentement « journal et pacte » : demandé avant d'écrire la première note ──
+  const journalConsent = useConsentStore((s) => s.journal);
+  const loadConsents = useConsentStore((s) => s.load);
+  const grantConsent = useConsentStore((s) => s.grant);
+  const [consentModalVisible, setConsentModalVisible] = useState(false);
+  const [grantingConsent, setGrantingConsent] = useState(false);
+  const openJournal = () => {
+    if (journalConsent === true) setJournalModalVisible(true);
+    else setConsentModalVisible(true);
+  };
+  const handleAcceptConsent = async () => {
+    setGrantingConsent(true);
+    const ok = await grantConsent('journal');
+    setGrantingConsent(false);
+    if (!ok) { showConsentError(); return; }
+    setConsentModalVisible(false);
+    setJournalModalVisible(true);
+  };
+  useEffect(() => {
+    if (user?.id) loadConsents(user.id);
+  }, [user?.id, loadConsents]);
 
   const isCompleted = lesson
     ? userProgress.some((p) => p.lesson_id === lesson.id)
@@ -220,6 +245,16 @@ export default function LeconScreen() {
 
   return (
     <View style={styles.container}>
+      <Modal visible={consentModalVisible} animationType="slide" onRequestClose={() => setConsentModalVisible(false)}>
+        <View style={styles.container}>
+          <ConsentGate
+            purpose="journal"
+            busy={grantingConsent}
+            onAccept={handleAcceptConsent}
+            onDecline={() => setConsentModalVisible(false)}
+          />
+        </View>
+      </Modal>
       <View style={styles.navBar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backArrow}>←</Text>
@@ -369,7 +404,7 @@ export default function LeconScreen() {
 
               <TouchableOpacity
                 style={styles.journalBtn}
-                onPress={() => setJournalModalVisible(true)}
+                onPress={openJournal}
                 >
                 <Text style={styles.journalBtnTxt}>
                   {journalEntryId ? '📝 Modifier ma note' : '📝 Écrire dans mon journal'}
@@ -387,7 +422,7 @@ export default function LeconScreen() {
               </View>
               <TouchableOpacity
                 style={styles.noteBtn}
-                onPress={() => setJournalModalVisible(true)}
+                onPress={openJournal}
               >
                 <Text style={styles.noteBtnTxt}>
                   {journalEntryId ? '✏️ Modifier ma note' : '✏️ Écrire une note'}

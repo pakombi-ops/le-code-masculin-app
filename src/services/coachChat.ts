@@ -32,6 +32,7 @@ export type CoachChatResult =
   | { kind: 'limit_reached'; used: number | null; limit: number | null }
   | { kind: 'no_session' }
   | { kind: 'unauthorized' }
+  | { kind: 'consent_required' }
   | { kind: 'rate_limited' }
   | { kind: 'bad_request'; message: string | null }
   | { kind: 'unavailable' }
@@ -108,6 +109,7 @@ export async function sendCoachMessage(
   const body = await parseJsonSafe(response);
 
   if (response.status === 401) return { kind: 'unauthorized' };
+  if (response.status === 403 && body?.error === 'consent_required') return { kind: 'consent_required' };
   if (response.status === 402) return { kind: 'limit_reached', used: numOrNull(body?.used), limit: numOrNull(body?.limit) };
   if (response.status === 429) return { kind: 'rate_limited' };
   if (response.status === 400) {

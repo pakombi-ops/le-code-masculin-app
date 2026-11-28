@@ -14,6 +14,9 @@ import { supabase, saveMessage, getConversationHistory } from '../../services/su
 import { sendCoachMessage, ServerQuota } from '../../services/coachChat';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CoachIntroOverlay } from '../../components/CoachIntroOverlay';
+import { ConsentGate } from '../../components/consent/ConsentGate';
+import { useConsentStore } from '../../store/consentStore';
+import { showConsentError } from '../../services/consentUi';
 
 const COACH_INTRO_SEEN_KEY = 'coach_intro_seen';
 
@@ -120,6 +123,22 @@ export default function CoachScreen() {
 
   const { user, aiQuota } = useAuthStore();
   const isPremium = aiQuota?.is_premium ?? false;
+
+  // ── Consentement explicite au coach (données pouvant révéler la santé) ──
+  const coachConsent = useConsentStore((s) => s.coach);
+  const loadConsents = useConsentStore((s) => s.load);
+  const grantConsent = useConsentStore((s) => s.grant);
+  const markConsentMissing = useConsentStore((s) => s.markMissing);
+  const [grantingConsent, setGrantingConsent] = useState(false);
+  useEffect(() => {
+    if (user?.id) loadConsents(user.id);
+  }, [user?.id, loadConsents]);
+  const handleAcceptConsent = async () => {
+    setGrantingConsent(true);
+    const ok = await grantConsent('coach');
+    setGrantingConsent(false);
+    if (!ok) showConsentError();
+  };
 
   // Compteur local — démarre depuis le quota Supabase ou 0
   const [localUsed, setLocalUsed] = useState(aiQuota?.messages_used ?? 0);
@@ -240,6 +259,11 @@ export default function CoachScreen() {
         case 'unauthorized':
           showReply('Ta session a expiré. Reconnecte-toi pour continuer.');
           break;
+        case 'consent_required':
+          // Accord absent ou retiré côté serveur : l'écran d'accord s'affiche de nouveau.
+          showReply('Ton accord est nécessaire pour utiliser le coach.');
+          markConsentMissing('coach');
+          break;
         case 'rate_limited':
           showReply('Tu envoies beaucoup de messages. Respire, et réessaie dans une minute.');
           break;
@@ -278,6 +302,29 @@ export default function CoachScreen() {
     return (
       <SafeScreen edges={['top']}>
         <CoachIntroOverlay onContinue={handleContinueFromIntro} />
+      </SafeScreen>
+    );
+  }
+
+  if (coachConsent === null) {
+    return (
+      <SafeScreen edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator color={Colors.brand.gold} />
+        </View>
+      </SafeScreen>
+    );
+  }
+
+  if (coachConsent === false) {
+    return (
+      <SafeScreen edges={['top']}>
+        <ConsentGate
+          purpose="coach"
+          busy={grantingConsent}
+          onAccept={handleAcceptConsent}
+          onDecline={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/accueil'))}
+        />
       </SafeScreen>
     );
   }
