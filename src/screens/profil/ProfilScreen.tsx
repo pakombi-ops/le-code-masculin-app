@@ -251,13 +251,13 @@ export default function ProfilScreen() {
               <View>
                 <Text style={styles.subscriptionTier}>{isPremium ? 'Plan Premium' : 'Plan Gratuit'}</Text>
                 <Text style={styles.subscriptionPrice}>
-                  {isPremium ? '24,75 €/mois' : `${10 - messagesUsed} messages IA restants`}
+                  {isPremium ? 'Accès complet' : `${10 - messagesUsed} messages IA restants`}
                 </Text>
               </View>
             </View>
             {!isPremium && (
               <TouchableOpacity onPress={() => router.push('/paywall')}>
-                <Text style={styles.upgradeLink}>Voir les plans</Text>
+                <Text style={styles.upgradeLink}>En savoir plus</Text>
               </TouchableOpacity>
             )}
           </View>

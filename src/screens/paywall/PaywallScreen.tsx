@@ -1,44 +1,27 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Alert, Linking, Image,
+  TouchableOpacity, ActivityIndicator, Alert, Image,
 } from 'react-native';
 import { router } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
-import * as ExpoLinking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, Sparkles, Check } from 'lucide-react-native';
+import { X, Sparkles } from 'lucide-react-native';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../theme';
 import { SafeScreen } from '../../components/layout/SafeScreen';
-import { supabase } from '../../services/supabase';
 import { useAuthStore } from '../../store/authStore';
-import { startAppCheckout } from '../../services/appCheckout';
-import {
-  CheckoutReturn, markCheckoutStarted, markCheckoutEnded, parseCheckoutUrl,
-  claimCheckoutReturn, presentCheckoutReturn,
-} from '../../services/checkoutReturn';
-
-const GENERIC_CHECKOUT_ERROR = "Impossible de démarrer l'essai pour le moment. Réessaie dans un instant.";
-
 /**
  * SCREEN — PaywallScreen (src/screens/paywall/PaywallScreen.tsx)
- * Structure inspirée de Moonly : hero plein écran, grille de bénéfices,
- * bandeau de preuve sociale, carrousel de témoignages avec photos, CTA collant.
+ * PAYWALL SANS VENTE : l'app ne vend rien. Ni prix, ni bouton de paiement, ni
+ * lien vers une page d'achat (règles App Store 3.1.1 / 3.1.3 et Google Play
+ * sur les paiements hors magasin). L'écran présente ce que débloque l'accès
+ * Premium et permet seulement de relier un abonnement existant :
+ * POST /api/link-account (jeton Supabase : le serveur cherche l'achat avec
+ * l'email confirmé du compte).
  *
- * CTA principal : démarre l'essai gratuit directement dans l'app (checkout
- * Stripe ouvert dans un navigateur intégré, retour via deep link). Aucun
- * achat in-app natif — reste un paiement web classique, juste rapatrié
- * dans l'app pour l'expérience utilisateur.
- *
- * Deux parcours annexes conservés :
- *   1. Déjà acheté sur le site → relier le compte via POST /api/link-account
- *      (jeton Supabase : le serveur cherche l'achat avec l'email confirmé du compte)
- *   2. Préférence pour le site → lien secondaire discret
+ * Ne pas y remettre le checkout Stripe : vérifié par src/screens/paywall/__tests__/noSale.test.ts.
  *
  * Photos requises dans assets/testimonials/ : nicolas.jpg, yannick.jpg, florent.jpg
  */
-
-const WEBSITE_URL = 'https://pilierconscient.com/le-code-masculin-redeviens-lhomme-que-tu-sais-etre/';
 
 const FEATURES = [
   'Coaching IA illimité',
@@ -79,83 +62,14 @@ const TESTIMONIALS = [
 ];
 
 type ViewMode = 'main' | 'link';
-type PlanId = 'monthly' | 'annual';
 
 export default function PaywallScreen() {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ViewMode>('main');
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>('annual');
   const [isChecking, setIsChecking] = useState(false);
-  const [isStartingTrial, setIsStartingTrial] = useState(false);
   const authUser = useAuthStore((s) => s.user);
 
-  const handleOpenWebsite = () => {
-    Linking.openURL(WEBSITE_URL);
-  };
-
   const goToLogin = () => router.replace('/(auth)/login');
-
-  const handleStartTrial = async () => {
-    if (isStartingTrial) return;
-
-    setIsStartingTrial(true);
-    try {
-      const redirectUrl = ExpoLinking.createURL('checkout-return');
-
-      const checkout = await startAppCheckout(
-        { plan: selectedPlan, prenom: authUser?.prenom ?? '', redirectUrl },
-        { getSession: () => supabase.auth.getSession() }
-      );
-
-      if (checkout.kind === 'no_session' || checkout.kind === 'unauthorized') {
-        Alert.alert('Session expirée', 'Session expirée, reconnecte-toi.', [
-          { text: 'Se reconnecter', onPress: goToLogin },
-        ]);
-        return;
-      }
-      if (checkout.kind === 'bad_request') {
-        Alert.alert('Erreur', checkout.message ?? GENERIC_CHECKOUT_ERROR);
-        return;
-      }
-      if (checkout.kind !== 'ok') {
-        Alert.alert('Erreur', GENERIC_CHECKOUT_ERROR);
-        return;
-      }
-
-      // La session intercepte le retour ; sur Android, Expo Router reçoit aussi
-      // le lien et ouvre app/checkout-return.tsx, qui se retire et nous laisse
-      // l'alerte (voir src/services/checkoutReturn.ts).
-      markCheckoutStarted();
-      let result: WebBrowser.WebBrowserAuthSessionResult;
-      let fromRoute: CheckoutReturn | null = null;
-      try {
-        result = await WebBrowser.openAuthSessionAsync(checkout.url, redirectUrl);
-      } finally {
-        fromRoute = markCheckoutEnded();
-      }
-
-      // Retour transmis par la session, sinon celui reçu par la route
-      // (navigateur fermé avant que la session ne voie le lien).
-      const ret = result.type === 'success' ? parseCheckoutUrl(result.url) : fromRoute;
-      if (!ret || !claimCheckoutReturn(ret)) return; // fermé sans retour, ou déjà traité
-
-      // On n'accorde rien localement : on relit l'état côté serveur.
-      const { user, checkEntitlement } = useAuthStore.getState();
-      const outcome = await presentCheckoutReturn(ret, {
-        userId: user?.id,
-        checkEntitlement,
-        isActive: () => useAuthStore.getState().entitlement.active,
-        alert: (title, message, onClose) =>
-          Alert.alert(title, message, [{ text: 'Continuer', onPress: onClose }], { cancelable: false }),
-      });
-      // Succès : on quitte le paywall. Annulation : on y reste pour réessayer.
-      if (outcome === 'activated' || outcome === 'pending') router.back();
-    } catch (err) {
-      Alert.alert('Erreur de connexion', 'Vérifie ta connexion et réessaie.');
-    } finally {
-      setIsStartingTrial(false);
-    }
-  };
 
   const handleCheckEntitlement = async () => {
     setIsChecking(true);
@@ -227,37 +141,13 @@ export default function PaywallScreen() {
 
         {mode === 'main' && (
           <>
-            {/* PRICING — sélectionnable, détermine le plan de l'essai */}
-            <View style={styles.pricingSection}>
-              <TouchableOpacity
-                style={[styles.priceCard, selectedPlan === 'monthly' && styles.priceCardSelected]}
-                onPress={() => setSelectedPlan('monthly')}
-                activeOpacity={0.85}
-              >
-                {selectedPlan === 'monthly' && (
-                  <View style={styles.selectedCheck}>
-                    <Check size={12} color={Colors.brand.navy} strokeWidth={3} />
-                  </View>
-                )}
-                <Text style={styles.priceLabel}>MENSUEL</Text>
-                <Text style={styles.priceValue}>29 €<Text style={styles.pricePeriod}>/mois</Text></Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.priceCard, styles.priceCardHighlight, selectedPlan === 'annual' && styles.priceCardSelected]}
-                onPress={() => setSelectedPlan('annual')}
-                activeOpacity={0.85}
-              >
-                <View style={styles.priceBadge}>
-                  <Text style={styles.priceBadgeTxt}>MEILLEURE VALEUR</Text>
-                </View>
-                {selectedPlan === 'annual' && (
-                  <View style={styles.selectedCheck}>
-                    <Check size={12} color={Colors.brand.navy} strokeWidth={3} />
-                  </View>
-                )}
-                <Text style={styles.priceLabel}>ANNUEL</Text>
-                <Text style={styles.priceValue}>297 €<Text style={styles.pricePeriod}>/an</Text></Text>
-              </TouchableOpacity>
+            {/* ACCÈS — information neutre, sans prix ni achat */}
+            <View style={styles.accessBox}>
+              <Text style={styles.accessTitle}>Accès réservé aux membres</Text>
+              <Text style={styles.accessText}>
+                Ces contenus sont inclus dans l'abonnement Le Code Masculin. Si tu es déjà abonné,
+                relie ton abonnement à ce compte.
+              </Text>
             </View>
 
             {/* FEATURES */}
@@ -299,12 +189,6 @@ export default function PaywallScreen() {
               ))}
             </View>
 
-            <TouchableOpacity onPress={() => setMode('link')} style={styles.linkBtn}>
-              <Text style={styles.linkTxt}>J'ai déjà un compte, relier mon abonnement</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleOpenWebsite} style={styles.linkBtn}>
-              <Text style={styles.linkTxtMuted}>Ou continuer sur le site</Text>
-            </TouchableOpacity>
           </>
         )}
 
@@ -338,22 +222,12 @@ export default function PaywallScreen() {
 
       </ScrollView>
 
-      {/* CTA COLLANT EN BAS */}
+      {/* BOUTON COLLANT : relier un abonnement existant (aucun achat) */}
       {mode === 'main' && (
         <View style={[styles.stickyFooter, { paddingBottom: Spacing.xl + insets.bottom }]}>
-          <TouchableOpacity
-            style={[styles.ctaBtn, isStartingTrial && styles.ctaBtnDisabled]}
-            onPress={handleStartTrial}
-            activeOpacity={0.9}
-            disabled={isStartingTrial}
-          >
-            {isStartingTrial ? (
-              <ActivityIndicator color={Colors.text.inverse} />
-            ) : (
-              <Text style={styles.ctaTxt}>Démarrer mon essai gratuit →</Text>
-            )}
+          <TouchableOpacity style={styles.ctaBtn} onPress={() => setMode('link')} activeOpacity={0.9}>
+            <Text style={styles.ctaTxt}>Relier mon abonnement →</Text>
           </TouchableOpacity>
-          <Text style={styles.ctaNote}>Carte requise · Aucun débit avant la fin de l'essai</Text>
         </View>
       )}
     </SafeScreen>
@@ -391,23 +265,14 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: { ...Typography.body, color: 'rgba(245, 240, 232, 0.8)', lineHeight: 22 },
 
-  pricingSection: { flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.xl, marginTop: Spacing.xl },
-  priceCard: {
-    flex: 1, backgroundColor: Colors.background.secondary, borderRadius: Radius.lg,
-    borderWidth: 1, borderColor: Colors.border.default, padding: Spacing.lg,
+
+  accessBox: {
+    marginHorizontal: Spacing.xl, marginTop: Spacing.xl, padding: Spacing.lg,
+    backgroundColor: Colors.background.secondary, borderRadius: Radius.lg,
+    borderWidth: 1, borderColor: Colors.brand.gold,
   },
-  priceCardHighlight: { borderColor: Colors.brand.gold, borderWidth: 2 },
-  priceCardSelected: { borderColor: Colors.brand.gold, borderWidth: 2, backgroundColor: Colors.background.tertiary },
-  selectedCheck: {
-    position: 'absolute', top: Spacing.sm, right: Spacing.sm,
-    width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.brand.gold,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  priceBadge: { position: 'absolute', top: -10, left: Spacing.md, backgroundColor: Colors.brand.gold, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
-  priceBadgeTxt: { fontSize: 9, fontWeight: '700', color: Colors.brand.navy },
-  priceLabel: { ...Typography.caption, color: Colors.text.muted, marginBottom: Spacing.xs },
-  priceValue: { ...Typography.h3, color: Colors.text.primary },
-  pricePeriod: { ...Typography.bodySmall, color: Colors.text.secondary },
+  accessTitle: { ...Typography.h4, color: Colors.text.primary, marginBottom: Spacing.xs },
+  accessText: { ...Typography.body, color: Colors.text.secondary, lineHeight: 22 },
 
   sectionTitle: { ...Typography.h4, color: Colors.text.primary, marginBottom: Spacing.md },
   featuresBox: { paddingHorizontal: Spacing.xl, marginTop: Spacing['2xl'] },
@@ -430,7 +295,6 @@ const styles = StyleSheet.create({
 
   linkBtn: { paddingVertical: Spacing.md, alignItems: 'center', marginTop: Spacing.md },
   linkTxt: { ...Typography.bodySmall, color: Colors.text.muted, textDecorationLine: 'underline' },
-  linkTxtMuted: { ...Typography.caption, color: Colors.text.muted },
 
   linkArea: { paddingHorizontal: Spacing.xl, marginTop: Spacing['2xl'] },
   linkTitle: { ...Typography.h3, color: Colors.text.primary, marginBottom: Spacing.xs },
@@ -450,5 +314,4 @@ const styles = StyleSheet.create({
   },
   ctaBtn: { backgroundColor: Colors.brand.gold, borderRadius: Radius.lg, paddingVertical: Spacing.base + 2, alignItems: 'center', ...Shadow.gold },
   ctaTxt: { ...Typography.button, color: Colors.text.inverse },
-  ctaNote: { ...Typography.caption, color: Colors.text.muted, textAlign: 'center', marginTop: Spacing.sm },
 });

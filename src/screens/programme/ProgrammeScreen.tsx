@@ -98,7 +98,7 @@ export default function ProgrammeScreen() {
             style={paywallStyles.ctaButton}
             onPress={() => router.push('/feature-info/programme')} // CHANGÉ
           >
-            <Text style={paywallStyles.ctaText}>Voir les plans</Text>
+            <Text style={paywallStyles.ctaText}>En savoir plus</Text>
           </TouchableOpacity>
         </View>
       </SafeScreen>
