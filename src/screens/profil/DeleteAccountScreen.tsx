@@ -9,16 +9,16 @@ import { SafeScreen } from '../../components/layout/SafeScreen';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../services/supabase';
 import {
-  sendDeletionCode, verifyDeletionCode, deleteAccount, deletionFailureMessage, CONFIRMATION_WORD,
+  verifyDeletionPassword, deleteAccount, deletionFailureMessage, CONFIRMATION_WORD,
 } from '../../services/accountDeletion';
 
 /**
  * ÉCRAN — Supprimer mon compte
  * 1. Ce qui est effacé, ce qui est gardé ; résiliation immédiate annoncée.
- * 2. Nouveau code envoyé par email (réauthentification).
+ * 2. Mot de passe du compte (réauthentification).
  * 3. Saisie de « SUPPRIMER », puis suppression.
  */
-type Step = 'info' | 'code' | 'confirm';
+type Step = 'info' | 'password' | 'confirm';
 
 export default function DeleteAccountScreen() {
   const email = useAuthStore((s) => s.user?.email ?? '');
@@ -27,37 +27,27 @@ export default function DeleteAccountScreen() {
 
   const [step, setStep] = useState<Step>('info');
   const [eraseCommunityText, setEraseCommunityText] = useState(true);
-  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
   const [word, setWord] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const requestCode = async () => {
-    if (!email) return;
+  const checkPassword = async () => {
     setBusy(true);
     try {
-      const result = await sendDeletionCode(email, supabase.auth as any);
-      if (result === 'sent') {
-        setCode('');
-        setStep('code');
-      } else {
-        Alert.alert('Code non envoyé', result === 'rate_limited'
-          ? 'Trop de demandes. Attends une minute et réessaie.'
-          : "Impossible d'envoyer le code. Vérifie ta connexion et réessaie.");
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const checkCode = async () => {
-    setBusy(true);
-    try {
-      const result = await verifyDeletionCode(email, code, supabase.auth as any);
+      const result = await verifyDeletionPassword(email, password, supabase.auth as any);
+      setPassword('');
       if (result === 'verified') {
         setWord('');
         setStep('confirm');
       } else {
-        Alert.alert('Code incorrect', 'Ce code est invalide ou a expiré.');
+        Alert.alert(
+          result === 'invalid' ? 'Mot de passe incorrect' : 'Vérification impossible',
+          result === 'invalid'
+            ? 'Ce mot de passe ne correspond pas à ton compte.'
+            : result === 'rate_limited'
+              ? 'Trop de tentatives. Attends quelques minutes et réessaie.'
+              : 'Vérifie ta connexion et réessaie.'
+        );
       }
     } finally {
       setBusy(false);
@@ -80,7 +70,7 @@ export default function DeleteAccountScreen() {
         ], { cancelable: false });
         return;
       }
-      if (result.kind === 'reauth_required' || result.kind === 'no_session') setStep('info');
+      if (result.kind === 'reauth_required' || result.kind === 'no_session') setStep('password');
       Alert.alert('Suppression impossible', deletionFailureMessage(result.kind));
     } finally {
       setBusy(false);
@@ -136,29 +126,29 @@ export default function DeleteAccountScreen() {
                 : 'Tes messages resteront visibles, signés « Membre supprimé ».'}
             </Text>
 
-            <Text style={styles.body}>Pour confirmer, nous envoyons un code à {email}.</Text>
-            <Button label="Recevoir un code par email" onPress={requestCode} busy={busy} disabled={!email} />
+            <Button label="Continuer" onPress={() => { setPassword(''); setStep('password'); }} busy={busy} disabled={!email} />
           </>
         )}
 
-        {step === 'code' && (
+        {step === 'password' && (
           <>
-            <Text style={styles.body}>Saisis le code reçu à {email}.</Text>
+            <Text style={styles.body}>Pour confirmer, saisis le mot de passe du compte {email}.</Text>
             <TextInput
               style={styles.input}
-              value={code}
-              onChangeText={setCode}
-              keyboardType="number-pad"
-              autoComplete="one-time-code"
-              textContentType="oneTimeCode"
-              placeholder="Code"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="current-password"
+              textContentType="password"
+              placeholder="Mot de passe"
               placeholderTextColor={Colors.text.muted}
-              maxLength={10}
             />
-            <Button label="Valider le code" onPress={checkCode} busy={busy} disabled={code.trim().length < 6} />
-            <TouchableOpacity onPress={requestCode} disabled={busy}>
-              <Text style={styles.link}>Renvoyer un code</Text>
-            </TouchableOpacity>
+            <Button label="Valider" onPress={checkPassword} busy={busy} disabled={password.length === 0} />
+            <Text style={styles.hint}>
+              Mot de passe oublié ? Déconnecte-toi, puis choisis « Mot de passe oublié » sur l'écran de connexion.
+            </Text>
           </>
         )}
 

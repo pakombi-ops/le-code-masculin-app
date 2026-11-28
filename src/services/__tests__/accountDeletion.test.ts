@@ -1,5 +1,5 @@
 import {
-  sendDeletionCode, verifyDeletionCode, deleteAccount, deletionFailureMessage, ACCOUNT_DELETE_URL,
+  verifyDeletionPassword, deleteAccount, deletionFailureMessage, ACCOUNT_DELETE_URL,
 } from '../accountDeletion';
 
 const TOKEN = 'supabase-access-token';
@@ -8,40 +8,33 @@ const withSession = (token: string | null = TOKEN) =>
 const mockResponse = (status: number, body: unknown) =>
   ({ status, ok: status >= 200 && status < 300, text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)) }) as unknown as Response;
 
-const makeAuth = (overrides: Partial<Record<'signInWithOtp' | 'verifyOtp', jest.Mock>> = {}) => ({
-  signInWithOtp: overrides.signInWithOtp ?? jest.fn().mockResolvedValue({ error: null }),
-  verifyOtp: overrides.verifyOtp ?? jest.fn().mockResolvedValue({ data: { session: { access_token: 'neuf' } }, error: null }),
+const makeAuth = (signInWithPassword?: jest.Mock) => ({
+  signInWithPassword: signInWithPassword ?? jest.fn().mockResolvedValue({ data: { session: { access_token: 'neuf' } }, error: null }),
 });
 
-describe('sendDeletionCode', () => {
-  it('envoie un code au compte existant, sans jamais créer de compte', async () => {
+describe('verifyDeletionPassword', () => {
+  it('se reconnecte avec le mot de passe du compte connecté', async () => {
     const auth = makeAuth();
-    expect(await sendDeletionCode('homme@exemple.fr', auth)).toBe('sent');
-    expect(auth.signInWithOtp).toHaveBeenCalledWith({ email: 'homme@exemple.fr', options: { shouldCreateUser: false } });
+    expect(await verifyDeletionPassword('homme@exemple.fr', 'secret-du-test', auth)).toBe('verified');
+    expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: 'homme@exemple.fr', password: 'secret-du-test' });
   });
 
-  it('429 → rate_limited, autre erreur → error', async () => {
-    expect(await sendDeletionCode('a@b.fr', makeAuth({ signInWithOtp: jest.fn().mockResolvedValue({ error: { status: 429 } }) }))).toBe('rate_limited');
-    expect(await sendDeletionCode('a@b.fr', makeAuth({ signInWithOtp: jest.fn().mockResolvedValue({ error: { message: 'x' } }) }))).toBe('error');
-  });
-});
-
-describe('verifyDeletionCode', () => {
-  it('vérifie le code (type email), espaces retirés', async () => {
+  it('champ vide : aucun appel', async () => {
     const auth = makeAuth();
-    expect(await verifyDeletionCode('a@b.fr', ' 123 456 ', auth)).toBe('verified');
-    expect(auth.verifyOtp).toHaveBeenCalledWith({ email: 'a@b.fr', token: '123456', type: 'email' });
+    expect(await verifyDeletionPassword('a@b.fr', '', auth)).toBe('invalid');
+    expect(await verifyDeletionPassword('', 'x', auth)).toBe('invalid');
+    expect(auth.signInWithPassword).not.toHaveBeenCalled();
   });
 
-  it('code mal formé : aucun appel', async () => {
-    const auth = makeAuth();
-    for (const code of ['', '12', 'abcdef']) expect(await verifyDeletionCode('a@b.fr', code, auth)).toBe('invalid');
-    expect(auth.verifyOtp).not.toHaveBeenCalled();
+  it('mot de passe refusé (400) ou sans session → invalid', async () => {
+    expect(await verifyDeletionPassword('a@b.fr', 'faux', makeAuth(jest.fn().mockResolvedValue({ data: null, error: { status: 400, message: 'Invalid login credentials' } })))).toBe('invalid');
+    expect(await verifyDeletionPassword('a@b.fr', 'x', makeAuth(jest.fn().mockResolvedValue({ data: { session: null }, error: null })))).toBe('invalid');
   });
 
-  it('code refusé ou sans session → invalid', async () => {
-    expect(await verifyDeletionCode('a@b.fr', '123456', makeAuth({ verifyOtp: jest.fn().mockResolvedValue({ data: null, error: { message: 'expired' } }) }))).toBe('invalid');
-    expect(await verifyDeletionCode('a@b.fr', '123456', makeAuth({ verifyOtp: jest.fn().mockResolvedValue({ data: { session: null }, error: null }) }))).toBe('invalid');
+  it('429 → rate_limited ; autre erreur ou réseau → error', async () => {
+    expect(await verifyDeletionPassword('a@b.fr', 'x', makeAuth(jest.fn().mockResolvedValue({ data: null, error: { status: 429 } })))).toBe('rate_limited');
+    expect(await verifyDeletionPassword('a@b.fr', 'x', makeAuth(jest.fn().mockResolvedValue({ data: null, error: { status: 500 } })))).toBe('error');
+    expect(await verifyDeletionPassword('a@b.fr', 'x', makeAuth(jest.fn().mockRejectedValue(new Error('offline'))))).toBe('error');
   });
 });
 
