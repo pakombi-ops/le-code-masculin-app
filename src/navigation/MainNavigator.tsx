@@ -11,7 +11,6 @@ import ProgrammeHomeScreen from '../screens/main/ProgrammeScreen';
 import PillarDetailScreen from '../screens/main/PillarDetailScreen';
 import LessonPlayerScreen from '../screens/main/LessonPlayerScreen';
 import ChatHomeScreen from '../screens/main/ChatScreen';
-import PaywallScreen from '../screens/main/PaywallScreen';
 import BibliothequeScreen from '../screens/main/BibliothequeScreen';
 import ProfilScreen from '../screens/main/ProfilScreen';
 
@@ -34,11 +33,6 @@ function ChatNavigator() {
   return (
     <ChatStack.Navigator screenOptions={{ headerShown: false }}>
       <ChatStack.Screen name="ChatHome" component={ChatHomeScreen} />
-      <ChatStack.Screen
-        name="Paywall"
-        component={PaywallScreen}
-        options={{ presentation: 'modal' }}
-      />
     </ChatStack.Navigator>
   );
 }

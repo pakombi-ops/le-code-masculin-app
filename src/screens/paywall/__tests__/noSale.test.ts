@@ -1,7 +1,7 @@
 /**
  * Paywall sans vente : aucun écran accessible de l'app ne démarre un paiement
- * ni n'affiche de prix. Les fichiers anciens non montés par expo-router
- * (src/navigation, src/screens/main) sont exclus.
+ * ni n'affiche de prix. L'ancien paywall (src/screens/main/PaywallScreen.tsx)
+ * est supprimé ; src/navigation et src/screens/main sont maintenant vérifiés aussi.
  */
 /* eslint-disable @typescript-eslint/no-var-requires */
 const fs = require('fs');
@@ -9,8 +9,6 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..', '..', '..');
 const EXCLUDED = [
-  path.join('src', 'navigation'),
-  path.join('src', 'screens', 'main'),
   path.join('src', 'services', 'appCheckout.ts'),
 ];
 
@@ -36,6 +34,10 @@ describe('paywall sans vente', () => {
   it("le paywall n'ouvre ni navigateur ni lien externe", () => {
     const paywall = read(path.join(ROOT, 'src', 'screens', 'paywall', 'PaywallScreen.tsx'));
     expect(paywall).not.toMatch(/openAuthSessionAsync|openBrowserAsync|Linking\.openURL|https?:\/\//);
+  });
+
+  it("l'ancien paywall avec prix n'existe plus", () => {
+    expect(fs.existsSync(path.join(ROOT, 'src', 'screens', 'main', 'PaywallScreen.tsx'))).toBe(false);
   });
 
   it("aucun prix sur les écrans qui mènent au paywall", () => {
