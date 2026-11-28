@@ -7,8 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
   Bell, Flame, Quote, KeyRound, Download, FileText, Lock,
-  Info, Star, MessageCircle, LogOut, Crown, Gift, Sparkles,CheckSquare,
+  Info, Star, MessageCircle, LogOut, Crown, Gift, Sparkles,CheckSquare, CreditCard,
 } from 'lucide-react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { SafeScreen } from '../../components/layout/SafeScreen';
 import { ProgressBar } from '../../components/ui';
@@ -17,6 +18,8 @@ import { getCompletedLessonIds, getOverallProgress } from '../../constants/progr
 import { updatePassword } from '../../services/supabase';
 import { getNotificationPrefs, setNotificationPref } from '../../services/notifications';
 import { exportUserData } from '../../services/dataExport';
+import { supabase } from '../../services/supabase';
+import { requestBillingPortal, billingPortalMessage, BILLING_RETURN_URL } from '../../services/billingPortal';
 
 
 const PRIVACY_URL = 'https://pilierconscient.com/politique-de-confidentialite/';
@@ -95,6 +98,36 @@ export default function ProfilScreen() {
     setNotifCitation(value);
     const prefs = await setNotificationPref('citation', value);
     setNotifCitation(prefs.citation);
+  };
+
+  const [openingPortal, setOpeningPortal] = useState(false);
+
+  // « Gérer mon abonnement » : portail Stripe (annulation, pause, carte, factures)
+  // dans le navigateur intégré. Au retour, l'accès est relu côté serveur.
+  const handleManageSubscription = async () => {
+    if (openingPortal) return;
+    setOpeningPortal(true);
+    try {
+      const portal = await requestBillingPortal({ getSession: () => supabase.auth.getSession() });
+      if (portal.kind !== 'ok') {
+        const { title, message } = billingPortalMessage(portal.kind);
+        const expired = portal.kind === 'no_session' || portal.kind === 'unauthorized';
+        Alert.alert(title, message, expired
+          ? [{ text: 'Se reconnecter', onPress: () => router.replace('/(auth)/login') }]
+          : undefined);
+        return;
+      }
+      await WebBrowser.openAuthSessionAsync(portal.url, BILLING_RETURN_URL);
+      if (user?.id) {
+        const { checkEntitlement, refreshQuota } = useAuthStore.getState();
+        await Promise.allSettled([checkEntitlement(user.id), refreshQuota(user.id)]);
+      }
+    } catch {
+      const { title, message } = billingPortalMessage('error');
+      Alert.alert(title, message);
+    } finally {
+      setOpeningPortal(false);
+    }
   };
 
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
@@ -261,6 +294,16 @@ export default function ProfilScreen() {
               </TouchableOpacity>
             )}
           </View>
+          {isPremium && (
+            <View style={[styles.settingsCard, { marginTop: Spacing.sm }]}>
+              <SettingRow
+                icon={<CreditCard size={18} color={Colors.text.secondary} />}
+                label="Gérer mon abonnement"
+                loading={openingPortal}
+                onPress={handleManageSubscription}
+              />
+            </View>
+          )}
         </View>
 
         {/* Notifications */}
