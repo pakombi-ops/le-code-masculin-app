@@ -1,0 +1,7 @@
+{
+  "_source": "Résultat de la requête B de supabase/checks/personal-table-fks.sql (clés étrangères entre les 17 tables personnelles). À remplacer par la sortie de la requête après chaque changement de schéma.",
+  "_verifie_le": "2026-11-27 (relecture : user_mandala → diagnostic_results, sans cascade)",
+  "fks": [
+    { "child": "user_mandala", "parent": "diagnostic_results", "on_delete": "NO ACTION" }
+  ]
+}

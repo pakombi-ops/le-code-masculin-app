@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
   Bell, Flame, Quote, KeyRound, Download, FileText, Lock,
-  Info, Star, MessageCircle, LogOut, Crown, Gift, Sparkles,CheckSquare,
+  Info, Star, MessageCircle, LogOut, Crown, Gift, Sparkles,CheckSquare, Trash2,
 } from 'lucide-react-native';
 import { Colors, Typography, Spacing, Radius } from '../../theme';
 import { SafeScreen } from '../../components/layout/SafeScreen';
@@ -308,6 +308,13 @@ export default function ProfilScreen() {
               label="Exporter mes donnees"
               onPress={handleExportData}
               loading={exporting}
+            />
+            <View style={styles.separator} />
+            <SettingRow
+              icon={<Trash2 size={18} color={Colors.status.error} />}
+              label="Supprimer mon compte"
+              onPress={() => router.push('/supprimer-compte')}
+              isDestructive
             />
             <View style={styles.separator} />
             <SettingRow
