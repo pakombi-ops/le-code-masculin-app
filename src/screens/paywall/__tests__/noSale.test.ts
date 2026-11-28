@@ -1,7 +1,7 @@
 /**
  * Paywall sans vente : aucun écran accessible de l'app ne démarre un paiement
  * ni n'affiche de prix. L'ancien paywall (src/screens/main/PaywallScreen.tsx)
- * est supprimé ; src/navigation et src/screens/main sont maintenant vérifiés aussi.
+ * est supprimé, comme toute l'ancienne navigation (src/navigation, src/screens/main).
  */
 /* eslint-disable @typescript-eslint/no-var-requires */
 const fs = require('fs');
